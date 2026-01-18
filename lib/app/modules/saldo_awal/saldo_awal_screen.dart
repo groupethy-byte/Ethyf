@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import '../../../services/local_database_service.dart';
 import '../../../services/sync_service.dart';
+import '../../../utils/number_formatter.dart';
 
 class SaldoAwalScreen extends StatefulWidget {
   const SaldoAwalScreen({Key? key}) : super(key: key);
@@ -464,6 +465,7 @@ class _SaldoAwalScreenState extends State<SaldoAwalScreen> {
             TextField(
               controller: saldoController,
               keyboardType: TextInputType.number,
+              inputFormatters: [CurrencyInputFormatter()],
               decoration: InputDecoration(
                 hintText: 'Masukkan nominal saldo',
                 labelText: 'Saldo Awal',

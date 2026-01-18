@@ -10,6 +10,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:excel/excel.dart' hide Border, BorderStyle;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import '../../../utils/number_formatter.dart';
 
 class TransaksiScreen extends StatefulWidget {
   final String type; // 'pendapatan' atau 'pengeluaran'
@@ -1258,10 +1259,11 @@ class _AddTransaksiScreenState extends State<AddTransaksiScreen> {
               TextField(
                 controller: _nilaiController,
                 keyboardType: TextInputType.number,
+                inputFormatters: [CurrencyInputFormatter()],
                 decoration: InputDecoration(
                   hintText: 'Masukkan nominal',
                   prefixIcon: const Icon(Icons.money),
-                  prefixText: 'Rp ',
+                  // prefixText: 'Rp ',
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10),
                   ),
@@ -1653,10 +1655,10 @@ class _PindahDanaScreenState extends State<PindahDanaScreen> {
               TextField(
                 controller: _nilaiController,
                 keyboardType: TextInputType.number,
+                inputFormatters: [CurrencyInputFormatter()],
                 decoration: InputDecoration(
                   hintText: 'Masukkan nominal',
                   prefixIcon: const Icon(Icons.money),
-                  prefixText: 'Rp ',
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10),
                   ),
@@ -1820,7 +1822,11 @@ class _TransaksiDetailScreenState extends State<TransaksiDetailScreen> {
   void initState() {
     super.initState();
     _catatanController = TextEditingController(text: widget.data['catatan'] ?? '');
-    _nilaiController = TextEditingController(text: (widget.data['nilai'] ?? 0).toString());
+    
+    final initialNilai = widget.data['nilai'] ?? 0;
+    final formattedNilai = NumberFormat('#,##0', 'id_ID').format(initialNilai);
+    _nilaiController = TextEditingController(text: formattedNilai);
+    
     _currentType = widget.data['type'] ?? widget.type;
     _selectedBank = widget.data['bankId'];
     _selectedBankName = widget.bankName;
@@ -2462,8 +2468,8 @@ class _TransaksiDetailScreenState extends State<TransaksiDetailScreen> {
                 controller: _nilaiController,
                 enabled: _isEditing,
                 keyboardType: TextInputType.number,
+                inputFormatters: [CurrencyInputFormatter()],
                 decoration: InputDecoration(
-                  prefixText: 'Rp ',
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10),
                   ),
@@ -2549,8 +2555,9 @@ class _TransaksiDetailScreenState extends State<TransaksiDetailScreen> {
                           setState(() => _isEditing = false);
                           _catatanController.text =
                               widget.data['catatan'] ?? '';
-                          _nilaiController.text =
-                              (widget.data['nilai'] ?? 0).toString();
+                          final initialNilai = widget.data['nilai'] ?? 0;
+                          final formattedNilai = NumberFormat('#,##0', 'id_ID').format(initialNilai);
+                          _nilaiController.text = formattedNilai;
                           _currentType = widget.data['type'] ?? widget.type;
                           _selectedSubKategori = widget.data['subKategoriId'];
                           _selectedBank = widget.data['bankId'];

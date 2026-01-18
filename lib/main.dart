@@ -20,6 +20,9 @@ import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
+import 'package:intl/intl.dart';
+import 'package:flutter/services.dart';
+import 'utils/number_formatter.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -392,8 +395,8 @@ class _LoginScreenState extends State<LoginScreen> {
     final email = _emailController.text.trim();
     final password = _passwordController.text.trim();
 
-if (email.isEmpty || password.isEmpty) {
-      showToast('Please fill in all fields', context: context);
+    if (email.isEmpty || password.isEmpty) {
+      showToast('Silakan isi semua field', context: context);
       return;
     }
 
@@ -406,8 +409,23 @@ if (email.isEmpty || password.isEmpty) {
     } on FirebaseAuthException catch (e) {
       if (mounted) {
         print('Firebase Auth Error Code: ${e.code}');
-        print('Firebase Auth Error Message: ${e.message}');
-        _showErrorDialog(e.code);
+        if (e.code == 'network-error') {
+          showToast(
+            'Kesalahan jaringan. Periksa koneksi internet Anda.',
+            context: context,
+            backgroundColor: Colors.orange,
+          );
+        } else {
+          _showErrorDialog(e.code);
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        showToast(
+          'Kesalahan: Periksa koneksi internet Anda.',
+          context: context,
+          backgroundColor: Colors.red,
+        );
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -1101,6 +1119,26 @@ class _SignUpScreenState extends State<SignUpScreen> {
         ),
       ),
       ),
+    );
+  }
+}
+
+// Tambahkan formatter custom
+class ThousandsSeparatorInputFormatter extends TextInputFormatter {
+  final NumberFormat _formatter = NumberFormat.decimalPattern('id');
+
+  @override
+  TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
+    // Hapus semua karakter non-digit
+    String newText = newValue.text.replaceAll(RegExp(r'[^0-9]'), '');
+    if (newText.isEmpty) return newValue.copyWith(text: '');
+    final number = int.parse(newText);
+    final formatted = _formatter.format(number);
+    // Hitung posisi kursor baru
+    int selectionIndex = formatted.length;
+    return TextEditingValue(
+      text: formatted,
+      selection: TextSelection.collapsed(offset: selectionIndex),
     );
   }
 }
