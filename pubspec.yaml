@@ -1,0 +1,52 @@
+name: ethyf
+description: A new Flutter project.
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.2
+  google_sign_in: ^6.2.0
+  firebase_core: ^3.15.0
+  firebase_auth: ^5.1.0
+  cloud_firestore: ^5.0.0
+  flutter_styled_toast: ^2.2.1
+  get: ^4.6.5
+  intl: ^0.19.0
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+  connectivity_plus: ^5.0.0
+  fl_chart: ^1.1.1
+  google_fonts: ^6.1.0
+  image_picker: ^1.0.7
+  firebase_storage: ^12.4.10
+  excel: ^4.0.0
+  path_provider: ^2.1.1
+  share_plus: ^7.2.0
+  rename: ^3.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^2.0.0
+  build_runner: ^2.4.0
+  hive_generator: ^2.0.0
+  flutter_launcher_icons: ^0.13.1
+
+flutter_icons:
+  android: "launcher_icon"
+  ios: false
+  image_path: "assets/images/logo.png"
+  remove_alpha_ios: true
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
