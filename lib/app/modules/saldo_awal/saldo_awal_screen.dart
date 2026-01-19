@@ -160,12 +160,24 @@ class _SaldoAwalScreenState extends State<SaldoAwalScreen> {
         final saldoAwal = bank['saldoAwal'] ?? 0;
         final bankName = bank['namaBanks'] ?? 'Unknown';
 
-        return FutureBuilder<int>(
+        return FutureBuilder<Map<String, dynamic>>(
           future: _calculateSaldoSementara(bankId),
           builder: (context, saldoSnapshot) {
             int saldoSementara = saldoAwal;
-            if (saldoSnapshot.hasData) {
-              saldoSementara = saldoSnapshot.data ?? saldoAwal;
+            bool hasTransactions = false;
+
+            if (saldoSnapshot.connectionState == ConnectionState.done &&
+                saldoSnapshot.hasData) {
+              saldoSementara = saldoSnapshot.data?['saldo'] ?? saldoAwal;
+              hasTransactions =
+                  saldoSnapshot.data?['hasTransactions'] ?? false;
+            }
+
+            Color saldoColor;
+            if (!hasTransactions) {
+              saldoColor = Colors.grey;
+            } else {
+              saldoColor = saldoSementara >= 0 ? Colors.green : Colors.red;
             }
 
             return Card(
@@ -178,7 +190,8 @@ class _SaldoAwalScreenState extends State<SaldoAwalScreen> {
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: const Color.fromARGB(255, 46, 204, 113).withOpacity(0.2),
+                        color: const Color.fromARGB(255, 46, 204, 113)
+                            .withOpacity(0.2),
                         shape: BoxShape.circle,
                       ),
                       child: const Icon(
@@ -208,29 +221,35 @@ class _SaldoAwalScreenState extends State<SaldoAwalScreen> {
                             ),
                           ),
                           const SizedBox(height: 4),
-                          Text(
-                            'Saldo Sementara: ${_formatCurrencyToRupiah(saldoSementara)}',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 12,
-                              color: saldoSementara >= saldoAwal
-                                  ? Colors.green
-                                  : Colors.red,
+                          if (saldoSnapshot.connectionState ==
+                              ConnectionState.waiting)
+                            const Text('Menghitung saldo...',
+                                style: TextStyle(
+                                    fontSize: 12, color: Colors.grey))
+                          else
+                            Text(
+                              'Saldo Sementara: ${_formatCurrencyToRupiah(saldoSementara)}',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                                color: saldoColor,
+                              ),
                             ),
-                          ),
                         ],
                       ),
                     ),
                     ElevatedButton.icon(
                       onPressed: () {
-                        _showEditSaldoDialog(context, bankId, bankName, saldoAwal);
+                        _showEditSaldoDialog(
+                            context, bankId, bankName, saldoAwal);
                       },
                       icon: const Icon(Icons.edit, size: 16),
                       label: const Text('Edit'),
                       style: ElevatedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(
                             horizontal: 12, vertical: 8),
-                        backgroundColor: const Color.fromARGB(255, 46, 204, 113),
+                        backgroundColor:
+                            const Color.fromARGB(255, 46, 204, 113),
                         foregroundColor: Colors.black87,
                       ),
                     ),
@@ -244,7 +263,7 @@ class _SaldoAwalScreenState extends State<SaldoAwalScreen> {
     );
   }
 
-  Future<int> _calculateSaldoSementara(String bankId) async {
+  Future<Map<String, dynamic>> _calculateSaldoSementara(String bankId) async {
     try {
       // Ambil saldo awal
       final bankDoc = await _firestore
@@ -254,7 +273,7 @@ class _SaldoAwalScreenState extends State<SaldoAwalScreen> {
           .doc(bankId)
           .get();
 
-      if (!bankDoc.exists) return 0;
+      if (!bankDoc.exists) return {'saldo': 0, 'hasTransactions': false};
 
       // Ambil data sebagai Map untuk menghindari error jika field tidak ada
       final Object? rawData = bankDoc.data();
@@ -271,6 +290,7 @@ class _SaldoAwalScreenState extends State<SaldoAwalScreen> {
           .where('bankId', isEqualTo: bankId)
           .get();
 
+      bool hasTransactions = transaksiSnapshot.docs.isNotEmpty;
       int totalPendapatan = 0;
       int totalPengeluaran = 0;
 
@@ -287,10 +307,10 @@ class _SaldoAwalScreenState extends State<SaldoAwalScreen> {
       }
 
       int saldoSementara = saldoAwal + totalPendapatan - totalPengeluaran;
-      return saldoSementara;
+      return {'saldo': saldoSementara, 'hasTransactions': hasTransactions};
     } catch (e) {
       print('Error calculating saldo sementara: $e');
-      return 0;
+      return {'saldo': 0, 'hasTransactions': false};
     }
   }
 

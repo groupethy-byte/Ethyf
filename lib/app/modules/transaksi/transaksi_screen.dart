@@ -1739,26 +1739,106 @@ class _PindahDanaScreenState extends State<PindahDanaScreen> {
 
     try {
       final nilai = int.parse(_nilaiController.text.replaceAll('.', ''));
+      final now = DateTime.now();
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        throw Exception('User not logged in');
+      }
 
-      // Kurangi saldo bank sebelum
+      // --- New Logic: Create 2 Transactions ---
+
+      // 1. Get bank names for notes
+      final bankSebelumDoc = await _firestore.collection('users').doc(user.uid).collection('banks').doc(_bankSebelum).get();
+      final bankSesudahDoc = await _firestore.collection('users').doc(user.uid).collection('banks').doc(_bankSesudah).get();
+      final bankSebelumName = bankSebelumDoc.data()?['namaBanks'] ?? 'Unknown';
+      final bankSesudahName = bankSesudahDoc.data()?['namaBanks'] ?? 'Unknown';
+
+      // 2. Get or create Category & Sub-category IDs
+      Future<String> getKategoriId(String namaKategori) async {
+        final query = await _firestore
+            .collection('users')
+            .doc(user.uid)
+            .collection('kategori')
+            .where('namaKategori', isEqualTo: namaKategori)
+            .limit(1)
+            .get();
+        if (query.docs.isNotEmpty) {
+          return query.docs.first.id;
+        } else {
+          final newDoc = await _firestore
+              .collection('users')
+              .doc(user.uid)
+              .collection('kategori')
+              .add({
+            'namaKategori': namaKategori,
+            'createdAt': FieldValue.serverTimestamp(),
+          });
+          return newDoc.id;
+        }
+      }
+      
+      Future<String> getSubKategoriId(String namaSubKategori) async {
+         final query = await _firestore
+            .collection('users')
+            .doc(user.uid)
+            .collection('subkategori')
+            .where('namaSubKategori', isEqualTo: namaSubKategori)
+            .limit(1)
+            .get();
+        if (query.docs.isNotEmpty) {
+          return query.docs.first.id;
+        } else {
+          final newDoc = await _firestore
+              .collection('users')
+              .doc(user.uid)
+              .collection('subkategori')
+              .add({
+            'namaSubKategori': namaSubKategori,
+            'createdAt': FieldValue.serverTimestamp(),
+          });
+          return newDoc.id;
+        }
+      }
+
+      final kategoriPengeluaranId = await getKategoriId('Pengeluaran');
+      final kategoriPendapatanId = await getKategoriId('Pendapatan');
+      final subKategoriId = await getSubKategoriId('Pindah Dana');
+
+      // 3. Create expense transaction from source bank
       await _firestore
           .collection('users')
-          .doc(user?.uid)
-          .collection('banks')
-          .doc(_bankSebelum)
-          .update({
-        'saldoAwal': FieldValue.increment(-nilai),
+          .doc(user.uid)
+          .collection('transaksi')
+          .add({
+        'type': 'pengeluaran',
+        'nilai': nilai,
+        'catatan': 'Pindah dana ke $bankSesudahName',
+        'bankId': _bankSebelum,
+        'tanggal': now,
+        'kategoriId': kategoriPengeluaranId,
+        'subKategoriId': subKategoriId,
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
       });
 
-      // Tambah saldo bank sesudah
+      // 4. Create income transaction to destination bank
       await _firestore
           .collection('users')
-          .doc(user?.uid)
-          .collection('banks')
-          .doc(_bankSesudah)
-          .update({
-        'saldoAwal': FieldValue.increment(nilai),
+          .doc(user.uid)
+          .collection('transaksi')
+          .add({
+        'type': 'pendapatan',
+        'nilai': nilai,
+        'catatan': 'Pindah dana dari $bankSebelumName',
+        'bankId': _bankSesudah,
+        'tanggal': now,
+        'kategoriId': kategoriPendapatanId,
+        'subKategoriId': subKategoriId,
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
       });
+
+      // --- End of New Logic ---
 
       // Sync data
       await SyncService.syncAllData();
@@ -1775,7 +1855,7 @@ class _PindahDanaScreenState extends State<PindahDanaScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
+          SnackBar(content: Text('Error saat pindah dana: $e')),
         );
       }
     } finally {
