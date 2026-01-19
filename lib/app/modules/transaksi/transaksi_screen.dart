@@ -1515,7 +1515,9 @@ class PindahDanaScreen extends StatefulWidget {
 
 class _PindahDanaScreenState extends State<PindahDanaScreen> {
   String? _bankSebelum;
+  String? _bankSebelumName;
   String? _bankSesudah;
+  String? _bankSesudahName;
   final _nilaiController = TextEditingController();
   bool _isLoading = false;
 
@@ -1526,6 +1528,143 @@ class _PindahDanaScreenState extends State<PindahDanaScreen> {
   void dispose() {
     _nilaiController.dispose();
     super.dispose();
+  }
+
+  void _showBankSearch(String bankType) {
+    String searchQuery = '';
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setStateSheet) {
+            return SafeArea(
+              child: Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(context).viewInsets.bottom,
+              ),
+              child: Container(
+                height: MediaQuery.of(context).size.height * 0.7,
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Pilih Bank ${bankType == 'sebelum' ? 'Sumber' : 'Tujuan'}',
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close),
+                          onPressed: () => Navigator.pop(context),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 15),
+                    TextField(
+                      autofocus: true,
+                      decoration: InputDecoration(
+                        hintText: 'Cari bank...',
+                        prefixIcon: const Icon(Icons.search),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 15,
+                          vertical: 10,
+                        ),
+                      ),
+                      onChanged: (value) {
+                        setStateSheet(() {
+                          searchQuery = value.toLowerCase();
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 15),
+                    Expanded(
+                      child: StreamBuilder<QuerySnapshot>(
+                        stream: _firestore
+                            .collection('users')
+                            .doc(user?.uid)
+                            .collection('banks')
+                            .orderBy('namaBanks')
+                            .snapshots(),
+                        builder: (context, snapshot) {
+                          if (snapshot.connectionState ==
+                              ConnectionState.waiting) {
+                            return const Center(
+                                child: CircularProgressIndicator());
+                          }
+
+                          if (!snapshot.hasData ||
+                              snapshot.data!.docs.isEmpty) {
+                            return const Center(
+                                child: Text('Tidak ada data bank'));
+                          }
+
+                          final docs = snapshot.data!.docs.where((doc) {
+                            final data = doc.data() as Map<String, dynamic>;
+                            final name = (data['namaBanks'] ?? '')
+                                .toString()
+                                .toLowerCase();
+                            return name.contains(searchQuery);
+                          }).toList();
+
+                          if (docs.isEmpty) {
+                            return const Center(
+                                child: Text('Tidak ditemukan'));
+                          }
+
+                          return ListView.builder(
+                            itemCount: docs.length,
+                            itemBuilder: (context, index) {
+                              final data =
+                                  docs[index].data() as Map<String, dynamic>;
+                              final name =
+                                  data['namaBanks'] ?? 'Unknown';
+                              final id = docs[index].id;
+
+                              return ListTile(
+                                title: Text(name),
+                                onTap: () {
+                                  setState(() {
+                                    if (bankType == 'sebelum') {
+                                      _bankSebelum = id;
+                                      _bankSebelumName = name;
+                                    } else {
+                                      _bankSesudah = id;
+                                      _bankSesudahName = name;
+                                    }
+                                  });
+                                  Navigator.pop(context);
+                                },
+                                trailing: (bankType == 'sebelum' ? _bankSebelum : _bankSesudah) == id
+                                    ? const Icon(Icons.check,
+                                        color: Colors.green)
+                                    : null,
+                              );
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   @override
@@ -1542,9 +1681,9 @@ class _PindahDanaScreenState extends State<PindahDanaScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Bank Sebelum (dari database)
+              // Bank Sebelum (dari)
               const Text(
-                'Bank Sebelum (dari)',
+                'Dari Bank',
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.bold,
@@ -1552,49 +1691,34 @@ class _PindahDanaScreenState extends State<PindahDanaScreen> {
                 ),
               ),
               const SizedBox(height: 8),
-              StreamBuilder<QuerySnapshot>(
-                stream: _firestore
-                    .collection('users')
-                    .doc(user?.uid)
-                    .collection('banks')
-                    .snapshots(),
-                builder: (context, snapshot) {
-                  if (!snapshot.hasData) {
-                    return const CircularProgressIndicator();
-                  }
-
-                  final banks = snapshot.data!.docs;
-                  return DropdownButtonFormField<String>(
-                    value: _bankSebelum,
-                    hint: const Text('Pilih Bank Sumber'),
-                    decoration: InputDecoration(
-                      prefixIcon: const Icon(Icons.account_balance),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
+              InkWell(
+                onTap: () => _showBankSearch('sebelum'),
+                child: InputDecorator(
+                  decoration: InputDecoration(
+                    prefixIcon: const Icon(Icons.account_balance),
+                    suffixIcon: const Icon(Icons.arrow_drop_down),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
                     ),
-                    items: banks
-                        .map((doc) {
-                          final data = doc.data() as Map<String, dynamic>;
-                          final bankId = doc.id;
-                          final bankName = data['namaBanks'] ?? 'Unknown';
-                          return DropdownMenuItem(
-                            value: bankId,
-                            child: Text(bankName),
-                          );
-                        })
-                        .toList(),
-                    onChanged: (value) {
-                      setState(() => _bankSebelum = value);
-                    },
-                  );
-                },
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 16),
+                  ),
+                  child: Text(
+                    _bankSebelumName ?? 'Pilih Bank Sumber',
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: _bankSebelumName != null
+                          ? Colors.black
+                          : Colors.grey.shade600,
+                    ),
+                  ),
+                ),
               ),
               const SizedBox(height: 20),
 
               // Bank Sesudah (ke)
               const Text(
-                'Bank Sesudah (ke)',
+                'Ke Bank',
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.bold,
@@ -1602,43 +1726,28 @@ class _PindahDanaScreenState extends State<PindahDanaScreen> {
                 ),
               ),
               const SizedBox(height: 8),
-              StreamBuilder<QuerySnapshot>(
-                stream: _firestore
-                    .collection('users')
-                    .doc(user?.uid)
-                    .collection('banks')
-                    .snapshots(),
-                builder: (context, snapshot) {
-                  if (!snapshot.hasData) {
-                    return const CircularProgressIndicator();
-                  }
-
-                  final banks = snapshot.data!.docs;
-                  return DropdownButtonFormField<String>(
-                    value: _bankSesudah,
-                    hint: const Text('Pilih Bank Tujuan'),
-                    decoration: InputDecoration(
-                      prefixIcon: const Icon(Icons.account_balance),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
+              InkWell(
+                onTap: () => _showBankSearch('sesudah'),
+                child: InputDecorator(
+                  decoration: InputDecoration(
+                    prefixIcon: const Icon(Icons.account_balance),
+                    suffixIcon: const Icon(Icons.arrow_drop_down),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
                     ),
-                    items: banks
-                        .map((doc) {
-                          final data = doc.data() as Map<String, dynamic>;
-                          final bankId = doc.id;
-                          final bankName = data['namaBanks'] ?? 'Unknown';
-                          return DropdownMenuItem(
-                            value: bankId,
-                            child: Text(bankName),
-                          );
-                        })
-                        .toList(),
-                    onChanged: (value) {
-                      setState(() => _bankSesudah = value);
-                    },
-                  );
-                },
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 16),
+                  ),
+                  child: Text(
+                    _bankSesudahName ?? 'Pilih Bank Tujuan',
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: _bankSesudahName != null
+                          ? Colors.black
+                          : Colors.grey.shade600,
+                    ),
+                  ),
+                ),
               ),
               const SizedBox(height: 20),
 
