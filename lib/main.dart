@@ -1168,6 +1168,20 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  // Helper untuk warna item navigasi bawah berdasarkan tab aktif
+  Color _getSelectedItemColor(int index) {
+    switch (index) {
+      case 0:
+        return Colors.blue; // Dashboard
+      case 1:
+        return Colors.green; // Pendapatan
+      case 2:
+        return Colors.red; // Pengeluaran
+      default:
+        return const Color.fromARGB(255, 46, 204, 113); // Default
+    }
+  }
+
   Future<void> _handleLogout(BuildContext context) async {
     try {
       // Sign out dari Firebase
@@ -1295,7 +1309,7 @@ class _HomeScreenState extends State<HomeScreen> {
       body: _buildPage(_selectedIndex),
       bottomNavigationBar: BottomNavigationBar(
         type: BottomNavigationBarType.fixed,
-        selectedItemColor: const Color.fromARGB(255, 46, 204, 113),
+        selectedItemColor: _getSelectedItemColor(_selectedIndex),
         unselectedItemColor: Colors.grey,
         currentIndex: _selectedIndex,
         onTap: (index) {
