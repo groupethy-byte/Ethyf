@@ -1989,64 +1989,66 @@ class _KategoriListScreenState extends State<KategoriListScreen> {
 
           final kategoriList = snapshot.data!.docs;
 
-          return Column(
-            children: [
-              Expanded(
-                child: ListView.builder(
-                  itemCount: kategoriList.length,
-                  itemBuilder: (context, index) {
-                    final kategori =
-                        kategoriList[index].data() as Map<String, dynamic>;
-                    return Card(
-                      margin: const EdgeInsets.symmetric(
-                        horizontal: 15,
-                        vertical: 8,
-                      ),
-                      elevation: 2,
-                      child: ListTile(
-                        leading: const Icon(
-                          Icons.category,
-                          color: Colors.orange,
+          return SafeArea(
+            child: Column(
+              children: [
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: kategoriList.length,
+                    itemBuilder: (context, index) {
+                      final kategori =
+                          kategoriList[index].data() as Map<String, dynamic>;
+                      return Card(
+                        margin: const EdgeInsets.symmetric(
+                          horizontal: 15,
+                          vertical: 8,
                         ),
-                        title: Text(
-                          kategori['namaKategori'] ?? 'Unknown',
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        subtitle:
-                            Text('ID: ${kategori['idKategori'] ?? 'N/A'}'),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.delete, color: Colors.red),
-                          onPressed: () {
-                            _deleteKategori(kategoriList[index].id);
-                          },
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(15),
-                child: SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const AddKategoriScreen(),
+                        elevation: 2,
+                        child: ListTile(
+                          leading: const Icon(
+                            Icons.category,
+                            color: Colors.orange,
+                          ),
+                          title: Text(
+                            kategori['namaKategori'] ?? 'Unknown',
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          subtitle:
+                              Text('ID: ${kategori['idKategori'] ?? 'N/A'}'),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.delete, color: Colors.red),
+                            onPressed: () {
+                              _deleteKategori(kategoriList[index].id);
+                            },
+                          ),
                         ),
                       );
                     },
-                    icon: const Icon(Icons.add),
-                    label: const Text('Tambah Kategori'),
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(15),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const AddKategoriScreen(),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.add),
+                      label: const Text('Tambah Kategori'),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           );
         },
       ),
@@ -2323,64 +2325,66 @@ class _SubKategoriListScreenState extends State<SubKategoriListScreen> {
 
           final subKategoriList = snapshot.data!.docs;
 
-          return Column(
-            children: [
-              Expanded(
-                child: ListView.builder(
-                  itemCount: subKategoriList.length,
-                  itemBuilder: (context, index) {
-                    final subKategori =
-                        subKategoriList[index].data() as Map<String, dynamic>;
-                    return Card(
-                      margin: const EdgeInsets.symmetric(
-                        horizontal: 15,
-                        vertical: 8,
-                      ),
-                      elevation: 2,
-                      child: ListTile(
-                        leading: const Icon(
-                          Icons.label,
-                          color: Colors.purple,
+          return SafeArea(
+            child: Column(
+              children: [
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: subKategoriList.length,
+                    itemBuilder: (context, index) {
+                      final subKategori =
+                          subKategoriList[index].data() as Map<String, dynamic>;
+                      return Card(
+                        margin: const EdgeInsets.symmetric(
+                          horizontal: 15,
+                          vertical: 8,
                         ),
-                        title: Text(
-                          subKategori['namaSubKategori'] ?? 'Unknown',
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        subtitle: Text(
-                            'ID: ${subKategori['idSubKategori'] ?? 'N/A'}'),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.delete, color: Colors.red),
-                          onPressed: () {
-                            _deleteSubKategori(subKategoriList[index].id);
-                          },
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(15),
-                child: SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const AddSubKategoriScreen(),
+                        elevation: 2,
+                        child: ListTile(
+                          leading: const Icon(
+                            Icons.label,
+                            color: Colors.purple,
+                          ),
+                          title: Text(
+                            subKategori['namaSubKategori'] ?? 'Unknown',
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          subtitle: Text(
+                              'ID: ${subKategori['idSubKategori'] ?? 'N/A'}'),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.delete, color: Colors.red),
+                            onPressed: () {
+                              _deleteSubKategori(subKategoriList[index].id);
+                            },
+                          ),
                         ),
                       );
                     },
-                    icon: const Icon(Icons.add),
-                    label: const Text('Tambah Sub Kategori'),
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(15),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const AddSubKategoriScreen(),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.add),
+                      label: const Text('Tambah Sub Kategori'),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           );
         },
       ),
@@ -2673,62 +2677,64 @@ class _BankListScreenState extends State<BankListScreen> {
 
           final banks = snapshot.data!.docs;
 
-          return Column(
-            children: [
-              Expanded(
-                child: ListView.builder(
-                  itemCount: banks.length,
-                  itemBuilder: (context, index) {
-                    final bank = banks[index].data() as Map<String, dynamic>;
-                    return Card(
-                      margin: const EdgeInsets.symmetric(
-                        horizontal: 15,
-                        vertical: 8,
-                      ),
-                      elevation: 2,
-                      child: ListTile(
-                        leading: const Icon(
-                          Icons.account_balance,
-                          color: Colors.green,
+          return SafeArea(
+            child: Column(
+              children: [
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: banks.length,
+                    itemBuilder: (context, index) {
+                      final bank = banks[index].data() as Map<String, dynamic>;
+                      return Card(
+                        margin: const EdgeInsets.symmetric(
+                          horizontal: 15,
+                          vertical: 8,
                         ),
-                        title: Text(
-                          bank['namaBanks'] ?? 'Unknown',
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        subtitle: Text('ID: ${bank['idBank'] ?? 'N/A'}'),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.delete, color: Colors.red),
-                          onPressed: () {
-                            _deleteBank(banks[index].id);
-                          },
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(15),
-                child: SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const AddBankScreen(),
+                        elevation: 2,
+                        child: ListTile(
+                          leading: const Icon(
+                            Icons.account_balance,
+                            color: Colors.green,
+                          ),
+                          title: Text(
+                            bank['namaBanks'] ?? 'Unknown',
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          subtitle: Text('ID: ${bank['idBank'] ?? 'N/A'}'),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.delete, color: Colors.red),
+                            onPressed: () {
+                              _deleteBank(banks[index].id);
+                            },
+                          ),
                         ),
                       );
                     },
-                    icon: const Icon(Icons.add),
-                    label: const Text('Tambah Bank'),
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(15),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const AddBankScreen(),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.add),
+                      label: const Text('Tambah Bank'),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           );
         },
       ),

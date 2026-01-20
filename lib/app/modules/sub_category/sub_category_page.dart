@@ -23,19 +23,21 @@ class _SubCategoryPageState extends State<SubCategoryPage> {
         title: const Text('Sub Category Page'),
         centerTitle: true,
       ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Text(
-              'Sub Category Page is working',
-              style: TextStyle(fontSize: 20),
-            ),
-            Text(
-              '$count',
-              style: Theme.of(context).textTheme.headlineSmall,
-            ),
-          ],
+      body: SafeArea(
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Text(
+                'Sub Category Page is working',
+                style: TextStyle(fontSize: 20),
+              ),
+              Text(
+                '$count',
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+            ],
+          ),
         ),
       ),
       floatingActionButton: FloatingActionButton(

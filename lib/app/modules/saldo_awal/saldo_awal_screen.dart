@@ -69,7 +69,7 @@ class _SaldoAwalScreenState extends State<SaldoAwalScreen> {
         title: const Text('Saldo Awal'),
         centerTitle: true,
       ),
-      body: _buildBody(),
+      body: SafeArea(child: _buildBody()),
     );
   }
 
@@ -138,7 +138,7 @@ class _SaldoAwalScreenState extends State<SaldoAwalScreen> {
         ),
         Expanded(
           child: ListView.builder(
-            padding: const EdgeInsets.all(15),
+            padding: const EdgeInsets.fromLTRB(15, 15, 15, 80),
             itemCount: localBanks.length,
             itemBuilder: (context, index) {
               final bank = localBanks[index];
@@ -152,7 +152,7 @@ class _SaldoAwalScreenState extends State<SaldoAwalScreen> {
 
   Widget _buildBanksList(List<QueryDocumentSnapshot> banks) {
     return ListView.builder(
-      padding: const EdgeInsets.all(15),
+      padding: const EdgeInsets.fromLTRB(15, 15, 15, 80),
       itemCount: banks.length,
       itemBuilder: (context, index) {
         final bank = banks[index].data() as Map<String, dynamic>;

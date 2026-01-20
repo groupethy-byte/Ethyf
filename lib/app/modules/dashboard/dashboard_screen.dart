@@ -18,6 +18,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   DateTime _startDate = DateTime(DateTime.now().year, DateTime.now().month, 1);
   DateTime _endDate = DateTime.now();
   String _filterType = 'all'; // all, pendapatan, pengeluaran, hutang
+  String _selectedPeriod = 'Bulan'; // Default period
 
   // Chart State
   String _chartType = 'income_expense'; // income_expense, subcategory, bank
@@ -27,7 +28,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
-    _statsFuture = _calculateStatistics();
+    _onPeriodSelected(_selectedPeriod); // Set initial date range
   }
 
   @override
@@ -45,6 +46,102 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  void _onPeriodSelected(String period) {
+    if (period == 'Periode') {
+      setState(() {
+        _selectedPeriod = period;
+      });
+      _selectDateRange();
+      return;
+    }
+
+    final now = DateTime.now();
+    DateTime start;
+    DateTime end = DateTime(now.year, now.month, now.day, 23, 59, 59);
+
+    switch (period) {
+      case 'Hari':
+        start = DateTime(now.year, now.month, now.day);
+        break;
+      case 'Minggu':
+        start = now.subtract(Duration(days: now.weekday - 1));
+        start = DateTime(start.year, start.month, start.day);
+        break;
+      case 'Bulan':
+        start = DateTime(now.year, now.month, 1);
+        break;
+      case 'Tahun':
+        start = DateTime(now.year, 1, 1);
+        break;
+      default:
+        // This should not happen with the current setup, but it makes the analyzer happy
+        throw Exception('Invalid period: $period');
+    }
+
+    setState(() {
+      _selectedPeriod = period;
+      _startDate = start;
+      _endDate = end;
+      _statsFuture = _calculateStatistics();
+    });
+  }
+
+  Future<void> _selectDateRange() async {
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+      initialDateRange: DateTimeRange(start: _startDate, end: _endDate),
+      helpText: 'Pilih Rentang Tanggal',
+      cancelText: 'Batal',
+      confirmText: 'Pilih',
+    );
+    if (picked != null) {
+      setState(() {
+        _startDate = picked.start;
+        _endDate = DateTime(picked.end.year, picked.end.month, picked.end.day, 23, 59, 59);
+        _selectedPeriod = 'Periode'; // Ensure this is set
+        _statsFuture = _calculateStatistics();
+      });
+    }
+  }
+
+  Widget _buildPeriodFilter() {
+    final periods = ['Hari', 'Minggu', 'Bulan', 'Tahun', 'Periode'];
+    return SizedBox(
+      height: 40,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        children: periods.map((period) {
+          final isSelected = _selectedPeriod == period;
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4.0),
+            child: ChoiceChip(
+              label: Text(period),
+              selected: isSelected,
+              onSelected: (selected) {
+                if (selected) {
+                  _onPeriodSelected(period);
+                }
+              },
+              selectedColor: const Color.fromARGB(255, 46, 204, 113),
+              labelStyle: TextStyle(
+                color: isSelected ? Colors.white : Colors.black87,
+                fontSize: 12,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+              ),
+              backgroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+                side: BorderSide(color: isSelected ? const Color.fromARGB(255, 46, 204, 113) : Colors.grey.shade300),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
   Widget _buildFilterSection() {
     return Container(
       color: const Color.fromARGB(255, 46, 204, 113).withOpacity(0.1),
@@ -52,54 +149,63 @@ class _DashboardScreenState extends State<DashboardScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Filter',
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
+           _buildPeriodFilter(),
           const SizedBox(height: 10),
-          // Date Range Filter
-          Row(
-            children: [
-              Expanded(
-                child: GestureDetector(
-                  onTap: () => _selectStartDate(),
-                  child: Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      border: Border.all(color: Colors.grey.shade300),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      DateFormat('dd MMM yyyy').format(_startDate),
-                      style: const TextStyle(fontSize: 12),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              const Text('-', style: TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(width: 10),
-              Expanded(
-                child: GestureDetector(
-                  onTap: () => _selectEndDate(),
-                  child: Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      border: Border.all(color: Colors.grey.shade300),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      DateFormat('dd MMM yyyy').format(_endDate),
-                      style: const TextStyle(fontSize: 12),
+          if (_selectedPeriod == 'Periode')
+            Row(
+              children: [
+                Expanded(
+                  child: InkWell(
+                    onTap: _selectDateRange,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color.fromARGB(255, 46, 204, 113).withOpacity(0.5)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.calendar_today, size: 16, color: Color.fromARGB(255, 46, 204, 113)),
+                          const SizedBox(width: 8),
+                          Text(
+                            DateFormat('dd MMM yyyy').format(_startDate),
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ],
-          ),
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 8.0),
+                  child: Text('-', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+                Expanded(
+                  child: InkWell(
+                    onTap: _selectDateRange,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color.fromARGB(255, 46, 204, 113).withOpacity(0.5)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.calendar_today, size: 16, color: Color.fromARGB(255, 46, 204, 113)),
+                          const SizedBox(width: 8),
+                          Text(
+                            DateFormat('dd MMM yyyy').format(_endDate),
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
         ],
       ),
     );
@@ -132,8 +238,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
           return const Center(child: CircularProgressIndicator());
         }
 
+        if (snapshot.connectionState == ConnectionState.done && !snapshot.hasData) {
+          return const Center(child: Text('Tidak ada data untuk rentang ini.'));
+        }
+        
+        if (snapshot.hasError) {
+          return Center(child: Text('Error: ${snapshot.error}'));
+        }
+
         if (!snapshot.hasData) {
-          return const Center(child: Text('No data'));
+          return const Center(child: Text('Tidak ada data'));
         }
 
         final stats = snapshot.data!;
@@ -273,6 +387,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           const SizedBox(height: 20),
           _buildChartLegend(stats),
+          _buildChartDataTable(stats),
         ],
       ),
     );
@@ -285,12 +400,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final income = (stats['totalPendapatan'] as int).toDouble();
       final expense = (stats['totalPengeluaran'] as int).toDouble();
       
+      final total = income + expense;
+      if (total == 0) return [PieChartSectionData(value: 1, color: Colors.grey.shade200, title: 'No data', radius: 50)];
+
       if (income > 0) {
         final isTouched = _touchedIndex == 0;
         sections.add(PieChartSectionData(
           color: Colors.green,
           value: income,
-          title: '${((income / (income + expense)) * 100).toStringAsFixed(0)}%',
+          title: '${((income / total) * 100).toStringAsFixed(0)}%',
           radius: isTouched ? 60 : 50,
           titleStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white),
         ));
@@ -300,7 +418,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         sections.add(PieChartSectionData(
           color: Colors.red,
           value: expense,
-          title: '${((expense / (income + expense)) * 100).toStringAsFixed(0)}%',
+          title: '${((expense / total) * 100).toStringAsFixed(0)}%',
           radius: isTouched ? 60 : 50,
           titleStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white),
         ));
@@ -312,6 +430,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       
       int i = 0;
       final total = data.values.fold(0, (sum, item) => sum + item);
+      if (total == 0) return [PieChartSectionData(value: 1, color: Colors.grey.shade200, title: '', radius: 50)];
+
       
       data.forEach((key, value) {
         final isTouched = _touchedIndex == i;
@@ -477,6 +597,51 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  Widget _buildChartDataTable(Map<String, dynamic> stats) {
+    if (_chartType == 'income_expense') {
+      return const SizedBox.shrink(); // Don't show table for this type
+    }
+
+    final Map<String, int> data = _chartType == 'subcategory' 
+        ? stats['subCategoryStats'] 
+        : stats['bankStats'];
+
+    if (data.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 20.0),
+        child: const Center(child: Text('Tidak ada data untuk ditampilkan di tabel.', style: TextStyle(fontSize: 12, color: Colors.grey))),
+      );
+    }
+    
+    // Sort data by value in descending order
+    final sortedEntries = data.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+
+    return Container(
+      margin: const EdgeInsets.only(top: 20),
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.grey.shade200),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: DataTable(
+        columnSpacing: 20,
+        columns: [
+          DataColumn(label: Text(_chartType == 'subcategory' ? 'Sub Kategori' : 'Bank', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+          DataColumn(label: Text('Nilai', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)), numeric: true),
+        ],
+        rows: sortedEntries.map((entry) {
+          return DataRow(
+            cells: [
+              DataCell(Text(entry.key, style: const TextStyle(fontSize: 12))),
+              DataCell(Text(_formatCurrency(entry.value), style: const TextStyle(fontSize: 12))),
+            ],
+          );
+        }).toList(),
+      ),
+    );
+  }
+
   Future<Map<String, dynamic>> _calculateStatistics() async {
     try {
       final snapshot = await _firestore
@@ -576,36 +741,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  Future<void> _selectStartDate() async {
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: _startDate,
-      firstDate: DateTime(2020),
-      lastDate: _endDate,
-    );
-    if (picked != null) {
-      setState(() {
-        _startDate = picked;
-        _statsFuture = _calculateStatistics();
-      });
-    }
-  }
-
-  Future<void> _selectEndDate() async {
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: _endDate,
-      firstDate: _startDate,
-      lastDate: DateTime.now(),
-    );
-    if (picked != null) {
-      setState(() {
-        _endDate = picked;
-        _statsFuture = _calculateStatistics();
-      });
-    }
-  }
-
   String _formatCurrency(int value) {
     return 'Rp ${value.toString().replaceAllMapped(
           RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
@@ -613,3 +748,4 @@ class _DashboardScreenState extends State<DashboardScreen> {
         )}';
   }
 }
+
