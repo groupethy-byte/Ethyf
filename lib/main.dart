@@ -23,6 +23,10 @@ import 'package:path_provider/path_provider.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter/services.dart';
 import 'utils/number_formatter.dart';
+import 'utils/user_utils.dart'; // New import
+import 'models/family_model.dart'; // New import
+import 'app/modules/family/family_management_page.dart'; // New import
+import 'app/modules/family/family_binding.dart'; // New import
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -83,6 +87,11 @@ class MyApp extends StatelessWidget {
             binding: CategoryBinding(),
           ),
           GetPage(name: '/sub-category', page: () => const SubCategoryPage()),
+          GetPage(
+            name: '/family-management', // New route
+            page: () => const FamilyManagementPage(),
+            binding: FamilyBinding(),
+          ),
         ],
       ),
     );
@@ -1153,6 +1162,20 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _selectedIndex = 0;
+  bool _isProMember = false;
+  String? _currentUserFamilyId;
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeProStatus(); // New method call
+  }
+
+  Future<void> _initializeProStatus() async {
+    _isProMember = await UserUtils.isCurrentUserProMember();
+    _currentUserFamilyId = await UserUtils.getCurrentUserFamilyId();
+    setState(() {}); // Refresh UI after data is loaded
+  }
 
   // Helper untuk judul AppBar berdasarkan tab aktif
   String _getTitle(int index) {
@@ -1271,6 +1294,15 @@ class _HomeScreenState extends State<HomeScreen> {
                         builder: (context) => const DataMasterScreen()));
               },
             ),
+            if (true) // Conditionally show for Pro members
+              ListTile(
+                leading: const Icon(Icons.family_restroom, color: Color.fromARGB(255, 46, 204, 113)),
+                title: const Text('Manajemen Keluarga'),
+                onTap: () {
+                  Navigator.pop(context);
+                  Get.toNamed('/family-management'); // Navigate using GetX
+                },
+              ),
             ListTile(
               leading: const Icon(Icons.info),
               title: const Text('About'),

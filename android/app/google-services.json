@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "735490202400",
+    "firebase_url": "https://ethyf-3b21f-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "ethyf-3b21f",
+    "storage_bucket": "ethyf-3b21f.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:735490202400:android:1c47ed0284e8efa6a75545",
+        "android_client_info": {
+          "package_name": "com.ethyf.finance"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "735490202400-8vc498u4ng37k4njia52i789vu886p24.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.ethyf.finance",
+            "certificate_hash": "507c87676b32e123e49a1f75a21f400b108deaa8"
+          }
+        },
+        {
+          "client_id": "735490202400-h76arro36fppbivs7nlc1qlt1tf994b0.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBc3WTKuImh4Wv--vOQfAvUdz7YY6LujG8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "735490202400-h76arro36fppbivs7nlc1qlt1tf994b0.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

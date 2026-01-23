@@ -11,6 +11,8 @@ import 'package:excel/excel.dart' hide Border, BorderStyle;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../../utils/number_formatter.dart';
+import '../../../utils/user_utils.dart'; // Import UserUtils
+import '../../../models/family_model.dart'; // Import FamilyModel
 
 class TransaksiScreen extends StatefulWidget {
   final String type; // 'pendapatan' atau 'pengeluaran'
@@ -28,10 +30,33 @@ class _TransaksiScreenState extends State<TransaksiScreen> {
   DateTime _startDate = DateTime(DateTime.now().year, DateTime.now().month, 1);
   DateTime _endDate = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day, 23, 59, 59);
 
+  bool _isProMember = false;
+  String? _currentUserFamilyId;
+  List<Map<String, String>> _familyMembers = [];
+  String? _selectedFilterMemberUid; // To store the UID of the selected family member for filtering
+
   @override
   void initState() {
     super.initState();
     _syncData();
+    _initializeTransaksiFamilyData(); // New method call
+  }
+
+  Future<void> _initializeTransaksiFamilyData() async {
+    _isProMember = await UserUtils.isCurrentUserProMember();
+    _currentUserFamilyId = await UserUtils.getCurrentUserFamilyId();
+
+    if (_isProMember && _currentUserFamilyId != null) {
+      _familyMembers = await UserUtils.getFamilyMembers(_currentUserFamilyId!);
+      // Add an "All Members" option
+      _familyMembers.insert(0, {'uid': 'all', 'name': 'Semua Anggota'});
+      // Set default filter to current user or "all"
+      _selectedFilterMemberUid = _familyMembers.firstWhere(
+        (member) => member['uid'] == user?.uid,
+        orElse: () => {'uid': 'all', 'name': 'Semua Anggota'},
+      )['uid'];
+    }
+    setState(() {}); // Refresh UI after data is loaded
   }
 
   Future<void> _syncData() async {
@@ -71,6 +96,36 @@ class _TransaksiScreenState extends State<TransaksiScreen> {
       body: Column(
         children: [
           _buildDateFilter(),
+          // Filter Anggota Keluarga (Hanya muncul jika Pro dan ada familyId)
+          if (_isProMember && _currentUserFamilyId != null && _familyMembers.isNotEmpty) ...[
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+              child: DropdownButtonFormField<String>(
+                value: _selectedFilterMemberUid,
+                decoration: InputDecoration(
+                  labelText: 'Filter Anggota',
+                  prefixIcon: const Icon(Icons.filter_list),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                items: _familyMembers
+                    .map((member) {
+                      return DropdownMenuItem(
+                        value: member['uid'],
+                        child: Text(member['name']!),
+                      );
+                    })
+                    .toList(),
+                onChanged: (value) {
+                  setState(() {
+                    _selectedFilterMemberUid = value;
+                  });
+                },
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
           Expanded(
             child: FutureBuilder<bool>(
         future: SyncService.isOnline(),
@@ -78,11 +133,25 @@ class _TransaksiScreenState extends State<TransaksiScreen> {
           final isOnline = snapshot.data ?? false;
 
           if (isOnline) {
-            return StreamBuilder<QuerySnapshot>(
-              stream: _firestore
+            Query collectionRef;
+            if (_isProMember && _currentUserFamilyId != null) {
+              collectionRef = _firestore
+                  .collection('families')
+                  .doc(_currentUserFamilyId!)
+                  .collection('transaksi');
+            } else {
+              collectionRef = _firestore
                   .collection('users')
                   .doc(user?.uid)
-                  .collection('transaksi')
+                  .collection('transaksi');
+            }
+
+            if (_selectedFilterMemberUid != null && _selectedFilterMemberUid != 'all') {
+              collectionRef = collectionRef.where('userId', isEqualTo: _selectedFilterMemberUid);
+            }
+
+            return StreamBuilder<QuerySnapshot>(
+              stream: collectionRef
                   .orderBy('createdAt', descending: true)
                   .snapshots(),
               builder: (context, snapshot) {
@@ -670,10 +739,28 @@ class _AddTransaksiScreenState extends State<AddTransaksiScreen> {
   late String _currentType;
   File? _selectedImage;
 
+  bool _isProMember = false;
+  String? _currentUserFamilyId;
+  List<Map<String, String>> _familyMembers = [];
+  String? _selectedFamilyMemberUid; // To store the UID of the selected family member for the transaction
+
   @override
   void initState() {
     super.initState();
     _currentType = widget.type;
+    _initializeFamilyData(); // New method call
+  }
+
+  Future<void> _initializeFamilyData() async {
+    _isProMember = await UserUtils.isCurrentUserProMember();
+    _currentUserFamilyId = await UserUtils.getCurrentUserFamilyId();
+
+    if (_isProMember && _currentUserFamilyId != null) {
+      _familyMembers = await UserUtils.getFamilyMembers(_currentUserFamilyId!);
+      // Set the current user as the default selected family member
+      _selectedFamilyMemberUid = user?.uid;
+    }
+    setState(() {}); // Refresh UI after data is loaded
   }
 
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -1136,6 +1223,41 @@ class _AddTransaksiScreenState extends State<AddTransaksiScreen> {
               ),
               const SizedBox(height: 20),
 
+              // Pilihan Anggota Keluarga (Hanya muncul jika Pro dan ada familyId)
+              if (_isProMember && _currentUserFamilyId != null && _familyMembers.isNotEmpty) ...[
+                const Text(
+                  'Anggota Keluarga',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.grey,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                DropdownButtonFormField<String>(
+                  value: _selectedFamilyMemberUid,
+                  hint: const Text('Pilih Anggota Keluarga'),
+                  decoration: InputDecoration(
+                    prefixIcon: const Icon(Icons.person),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                  items: _familyMembers
+                      .map((member) {
+                        return DropdownMenuItem(
+                          value: member['uid'],
+                          child: Text(member['name']!),
+                        );
+                      })
+                      .toList(),
+                  onChanged: (value) {
+                    setState(() => _selectedFamilyMemberUid = value);
+                  },
+                ),
+                const SizedBox(height: 20),
+              ],
+
               // Kategori (dari database)
               if (widget.type != 'pengeluaran' && widget.type != 'pendapatan') ...[
               const Text(
@@ -1463,11 +1585,18 @@ class _AddTransaksiScreenState extends State<AddTransaksiScreen> {
         }
       }
 
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .collection('transaksi')
-          .add({
+      final String targetUserId = _isProMember && _selectedFamilyMemberUid != null ? _selectedFamilyMemberUid! : user.uid;
+      CollectionReference transaksiCollection;
+      String? transaksiFamilyId;
+
+      if (_isProMember && _currentUserFamilyId != null) {
+        transaksiCollection = _firestore.collection('families').doc(_currentUserFamilyId!).collection('transaksi');
+        transaksiFamilyId = _currentUserFamilyId;
+      } else {
+        transaksiCollection = _firestore.collection('users').doc(user.uid).collection('transaksi');
+      }
+
+      await transaksiCollection.add({
         'tanggal': _selectedDate,
         'bankId': _selectedBank,
         'kategoriId': _selectedKategori,
@@ -1478,6 +1607,8 @@ class _AddTransaksiScreenState extends State<AddTransaksiScreen> {
         'fotoStruk': fotoStrukUrl,
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
+        'userId': targetUserId, // Set the correct userId
+        if (transaksiFamilyId != null) 'familyId': transaksiFamilyId, // Add familyId if available
       });
 
       // Sync data ke local storage

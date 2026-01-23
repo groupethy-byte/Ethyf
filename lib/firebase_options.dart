@@ -51,8 +51,8 @@ class DefaultFirebaseOptions {
   );
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyBc4v_CqP_YyUYgBLxer-UmrteGXG0OrEI',
-    appId: '1:735490202400:web:73001863b8a216d6a75545',
+    apiKey: 'AIzaSyBc3WTKuImh4Wv--vOQfAvUdz7YY6LujG8',
+    appId: '1:735490202400:android:1c47ed0284e8efa6a75545',
     messagingSenderId: '735490202400',
     projectId: 'ethyf-3b21f',
     databaseURL: 'https://ethyf-3b21f.firebaseio.com',

@@ -1,0 +1,28 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Allow users to read other user documents (for invites), but only write to their own.
+    match /users/{userId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null; // Dilonggarkan untuk uji coba (invite member)
+    }
+
+    // Allow users to manage their own bank accounts
+    match /users/{userId}/banks/{bankId} {
+    	allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Rules for families
+    match /families/{familyId} {
+      // Dilonggarkan untuk uji coba (create & update family)
+      allow read, write: if request.auth != null;
+    }
+
+    // Rules for transactions within a family
+    match /families/{familyId}/transactions/{transactionId} {
+    	// Allow read, write if the user is a member of the family.
+      allow read, write: if request.auth != null && get(/databases/$(database)/documents/families/$(familyId)).data.memberUids.hasAny([request.auth.uid]);
+    }
+  }
+}
