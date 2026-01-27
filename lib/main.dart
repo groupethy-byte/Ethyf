@@ -79,7 +79,11 @@ class MyApp extends StatelessWidget {
         getPages: [
           GetPage(name: '/login', page: () => const LoginScreen()),
           GetPage(name: '/signup', page: () => const SignUpScreen()),
-          GetPage(name: '/home', page: () => const HomeScreen()),
+          GetPage(
+            name: '/home',
+            page: () => const HomeScreen(),
+            binding: FamilyBinding(), // Daftarkan binding di sini
+          ),
           GetPage(name: '/intro', page: () => const IntroScreen()),
           GetPage(
             name: '/category',
@@ -372,7 +376,22 @@ class _LoginScreenState extends State<LoginScreen> {
           accessToken: googleAuth.accessToken,
           idToken: googleAuth.idToken,
         );
-        await _auth.signInWithCredential(credential);
+        
+        // Simpan credential untuk mendapatkan user info
+        final UserCredential userCredential = await _auth.signInWithCredential(credential);
+        
+        // FIX: Pastikan data user tersimpan di Firestore agar bisa dicari saat invite family
+        if (userCredential.user != null) {
+          final userDoc = await FirebaseFirestore.instance.collection('users').doc(userCredential.user!.uid).get();
+          if (!userDoc.exists) {
+            await FirebaseFirestore.instance.collection('users').doc(userCredential.user!.uid).set({
+              'fullName': userCredential.user!.displayName ?? 'User',
+              'email': userCredential.user!.email!.toLowerCase(), // Pastikan lowercase
+              'createdAt': FieldValue.serverTimestamp(),
+            });
+          }
+        }
+
         if (mounted) {
           Navigator.pushReplacementNamed(context, '/home');
         }
@@ -807,7 +826,22 @@ class _SignUpScreenState extends State<SignUpScreen> {
           accessToken: googleAuth.accessToken,
           idToken: googleAuth.idToken,
         );
-        await _auth.signInWithCredential(credential);
+        
+        // Simpan credential untuk mendapatkan user info
+        final UserCredential userCredential = await _auth.signInWithCredential(credential);
+
+        // FIX: Pastikan data user tersimpan di Firestore saat Sign Up Google
+        if (userCredential.user != null) {
+          final userDoc = await FirebaseFirestore.instance.collection('users').doc(userCredential.user!.uid).get();
+          if (!userDoc.exists) {
+            await FirebaseFirestore.instance.collection('users').doc(userCredential.user!.uid).set({
+              'fullName': userCredential.user!.displayName ?? 'User',
+              'email': userCredential.user!.email!.toLowerCase(),
+              'createdAt': FieldValue.serverTimestamp(),
+            });
+          }
+        }
+
         if (mounted) {
           Navigator.pushReplacementNamed(context, '/home');
         }
@@ -878,6 +912,15 @@ class _SignUpScreenState extends State<SignUpScreen> {
       
       // Update profile dengan nama
       await userCredential.user?.updateDisplayName(name);
+
+      // Save user data to Firestore
+      if (userCredential.user != null) {
+        await FirebaseFirestore.instance.collection('users').doc(userCredential.user!.uid).set({
+          'fullName': name,
+          'email': email.toLowerCase(),
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      }
       
       if (mounted) {
         showToast(

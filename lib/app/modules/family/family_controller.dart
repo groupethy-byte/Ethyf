@@ -27,8 +27,20 @@ class FamilyController extends GetxController {
       if (familyId != null) {
         final familyDoc = await _firestore.collection('families').doc(familyId).get();
         if (familyDoc.exists) {
-          currentFamily.value = FamilyModel.fromMap(familyDoc.id, familyDoc.data()!);
-          familyMembers.value = await UserUtils.getFamilyMembers(familyId);
+          final familyData = familyDoc.data()!;
+          currentFamily.value = FamilyModel.fromMap(familyDoc.id, familyData);
+          // familyMembers.value = await UserUtils.getFamilyMembers(familyId); // Diganti dengan implementasi manual
+
+          // Ambil nama anggota keluarga secara manual untuk memastikan data nama benar
+          final List<String> memberUids = List<String>.from(familyData['memberUids'] ?? []);
+          final List<Map<String, String>> members = [];
+          for (String uid in memberUids) {
+            final userDoc = await _firestore.collection('users').doc(uid).get();
+            if (userDoc.exists) {
+              members.add({'uid': uid, 'name': userDoc.data()?['fullName'] ?? 'Nama tidak ditemukan'});
+            }
+          }
+          familyMembers.value = members;
         }
       }
     } catch (e) {
@@ -40,20 +52,23 @@ class FamilyController extends GetxController {
   }
 
   Future<void> inviteMember(String emailOrUid) async {
+    // Bersihkan input dari spasi di awal/akhir
+    final String cleanInput = emailOrUid.trim();
+
     // TODO: Implement actual invitation logic (e.g., generate invite code, send email)
-    print("Inviting $emailOrUid to family ${currentFamily.value?.familyName}");
+    print("Inviting $cleanInput to family ${currentFamily.value?.familyName}");
     // For now, just add a dummy member if family exists
     if (currentFamily.value != null && user != null) {
       try {
-        String invitedUid = emailOrUid;
+        String invitedUid = cleanInput;
 
         // Cek apakah input adalah email
-        if (emailOrUid.contains('@')) {
-          final userQuery = await _firestore.collection('users').where('email', isEqualTo: emailOrUid).limit(1).get();
+        if (cleanInput.contains('@')) {
+          final userQuery = await _firestore.collection('users').where('email', isEqualTo: cleanInput.toLowerCase()).limit(1).get();
           if (userQuery.docs.isNotEmpty) {
             invitedUid = userQuery.docs.first.id;
           } else {
-            Get.snackbar("Error", "User dengan email tersebut tidak ditemukan.");
+            Get.snackbar("Error", "User dengan email '$cleanInput' tidak ditemukan.");
             return;
           }
         } else {
@@ -63,6 +78,11 @@ class FamilyController extends GetxController {
             Get.snackbar("Error", "User dengan UID tersebut tidak ditemukan.");
             return;
           }
+        }
+
+        if (invitedUid == user!.uid) {
+          Get.snackbar("Info", "Anda tidak dapat mengundang diri sendiri.");
+          return;
         }
 
         List<String> updatedMembers = List<String>.from(currentFamily.value!.memberUids);
@@ -79,10 +99,10 @@ class FamilyController extends GetxController {
             // 'isProMember': true, // This should be handled by the pro subscription logic
           });
 
-          Get.snackbar("Success", "$emailOrUid invited to family!");
+          Get.snackbar("Success", "$cleanInput invited to family!");
           _fetchFamilyData(); // Refresh data
         } else {
-          Get.snackbar("Info", "$emailOrUid is already a member.");
+          Get.snackbar("Info", "$cleanInput is already a member.");
         }
       } catch (e) {
         Get.snackbar("Error", "Failed to invite member: $e");

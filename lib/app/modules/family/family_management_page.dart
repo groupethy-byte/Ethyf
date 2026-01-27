@@ -43,7 +43,7 @@ class FamilyManagementPage extends GetView<FamilyController> {
                         style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(height: 10),
-                      Text('ID Keluarga: ${family.id}', style: const TextStyle(color: Colors.grey)),
+                      // Text('ID Keluarga: ${family.id}', style: const TextStyle(color: Colors.grey)), // ID Keluarga disembunyikan
                       const SizedBox(height: 10),
                       Text(
                         family.isPro ? 'Status: Pro (Aktif)' : 'Status: Free (Upgrade untuk fitur lengkap)',
@@ -78,8 +78,8 @@ class FamilyManagementPage extends GetView<FamilyController> {
                 elevation: 2,
                 child: ListTile(
                   leading: const Icon(Icons.person),
-                  title: Text(member['name'] ?? 'Tidak Dikenal'),
-                  subtitle: Text(member['uid'] ?? ''),
+                  title: Text(member['name'] ?? 'Nama tidak dikenal'),
+                  // subtitle: Text(member['uid'] ?? ''), // UID Anggota disembunyikan
                   // TODO: Add options to remove member if current user is owner
                 ),
               )),
