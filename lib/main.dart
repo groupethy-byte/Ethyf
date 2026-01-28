@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
+import 'dart:async';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -82,7 +83,6 @@ class MyApp extends StatelessWidget {
           GetPage(
             name: '/home',
             page: () => const HomeScreen(),
-            binding: FamilyBinding(), // Daftarkan binding di sini
           ),
           GetPage(name: '/intro', page: () => const IntroScreen()),
           GetPage(
@@ -129,7 +129,7 @@ class _SplashScreenState extends State<SplashScreen> {
         child: Padding(
           padding: const EdgeInsets.all(40.0),
           child: Image.asset(
-            'assets/images/logo splash ethyf.png',
+            'assets/images/logo splash ethyf open.png',
           ),
         ),
       ),
@@ -1214,10 +1214,46 @@ class _HomeScreenState extends State<HomeScreen> {
     _initializeProStatus(); // New method call
   }
 
+  @override
+  void dispose() {
+    super.dispose();
+  }
+
   Future<void> _initializeProStatus() async {
     _isProMember = await UserUtils.isCurrentUserProMember();
     _currentUserFamilyId = await UserUtils.getCurrentUserFamilyId();
+    await _checkAndCreateDefaultBank();
     setState(() {}); // Refresh UI after data is loaded
+  }
+
+  Future<void> _checkAndCreateDefaultBank() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    CollectionReference banksRef;
+
+    if (_isProMember && _currentUserFamilyId != null) {
+      banksRef = FirebaseFirestore.instance.collection('families').doc(_currentUserFamilyId!).collection('banks');
+    } else {
+      banksRef = FirebaseFirestore.instance.collection('users').doc(user.uid).collection('banks');
+    }
+
+    try {
+      final querySnapshot = await banksRef.where('namaBanks', isEqualTo: 'CASH').limit(1).get();
+
+      if (querySnapshot.docs.isEmpty) {
+        final idBank = 'BANK${DateTime.now().millisecondsSinceEpoch}';
+        await banksRef.add({
+          'idBank': idBank,
+          'namaBanks': 'CASH',
+          'userId': user.uid,
+          'saldoAwal': 0,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      }
+    } catch (e) {
+      print('Error creating default bank: $e');
+    }
   }
 
   // Helper untuk judul AppBar berdasarkan tab aktif
@@ -1231,6 +1267,19 @@ class _HomeScreenState extends State<HomeScreen> {
         return 'Pengeluaran';
       default:
         return 'Ethyf';
+    }
+  }
+
+  Color _getNavBarColor(int index) {
+    switch (index) {
+      case 0:
+        return Colors.grey[800]!; // Dashboard: Abu-abu gelap
+      case 1:
+        return Colors.green; // Pendapatan: Hijau
+      case 2:
+        return Colors.red; // Pengeluaran: Merah
+      default:
+        return const Color.fromARGB(255, 46, 204, 113);
     }
   }
 
@@ -1270,32 +1319,53 @@ class _HomeScreenState extends State<HomeScreen> {
         centerTitle: true,
         actions: [
           if (_selectedIndex == 0) ...[
-            GestureDetector(
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => const ProfilScreen()),
-                );
-              },
-              child: CircleAvatar(
-                radius: 16,
-                backgroundColor: Colors.white,
-                backgroundImage: user?.photoURL != null
-                    ? (user!.photoURL!.startsWith('http')
-                        ? NetworkImage(user!.photoURL!)
-                        : FileImage(File(user!.photoURL!)) as ImageProvider)
-                    : null,
-                child: user?.photoURL == null
-                    ? Text(
-                        (user?.displayName ?? 'U')[0].toUpperCase(),
-                        style: const TextStyle(
-                          fontSize: 14.0,
-                          color: Color.fromARGB(255, 46, 204, 113),
-                          fontWeight: FontWeight.bold,
+            Stack(
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.notifications),
+                  onPressed: () {
+                    Get.toNamed('/family-management');
+                  },
+                ),
+                StreamBuilder<QuerySnapshot>(
+                  stream: user != null
+                      ? FirebaseFirestore.instance
+                          .collection('invitations')
+                          .where('inviteeUid', isEqualTo: user.uid)
+                          .where('status', isEqualTo: 'pending')
+                          .snapshots()
+                      : const Stream.empty(),
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                      return const SizedBox.shrink();
+                    }
+                    final count = snapshot.data!.docs.length;
+                    return Positioned(
+                      right: 10,
+                      top: 10,
+                      child: Container(
+                        padding: const EdgeInsets.all(2),
+                        decoration: BoxDecoration(
+                          color: Colors.red,
+                          borderRadius: BorderRadius.circular(6),
                         ),
-                      )
-                    : null,
-              ),
+                        constraints: const BoxConstraints(
+                          minWidth: 14,
+                          minHeight: 14,
+                        ),
+                        child: Text(
+                          '$count',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 8,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ],
             ),
             const SizedBox(width: 16),
           ],
@@ -1370,7 +1440,7 @@ class _HomeScreenState extends State<HomeScreen> {
       body: _buildPage(_selectedIndex),
       bottomNavigationBar: BottomNavigationBar(
         type: BottomNavigationBarType.fixed,
-        selectedItemColor: const Color.fromARGB(255, 46, 204, 113),
+        selectedItemColor: _getNavBarColor(_selectedIndex),
         unselectedItemColor: Colors.grey,
         currentIndex: _selectedIndex,
         onTap: (index) {
@@ -2004,25 +2074,49 @@ class _KategoriListScreenState extends State<KategoriListScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final user = FirebaseAuth.instance.currentUser;
 
+  bool _isProMember = false;
+  String? _currentUserFamilyId;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkFamilyStatus();
+  }
+
+  Future<void> _checkFamilyStatus() async {
+    _isProMember = await UserUtils.isCurrentUserProMember();
+    _currentUserFamilyId = await UserUtils.getCurrentUserFamilyId();
+    setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
+    Query collectionRef;
+    if (_isProMember && _currentUserFamilyId != null) {
+      collectionRef = _firestore.collection('families').doc(_currentUserFamilyId!).collection('kategori');
+    } else {
+      collectionRef = _firestore.collection('users').doc(user?.uid).collection('kategori');
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Daftar Kategori'),
         centerTitle: true,
       ),
       body: StreamBuilder<QuerySnapshot>(
-        stream: _firestore
-            .collection('users')
-            .doc(user?.uid)
-            .collection('kategori')
-            .snapshots(),
+        stream: collectionRef.snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
 
           if (snapshot.hasError) {
+            if (snapshot.error.toString().contains('permission-denied')) {
+              return const Center(child: Padding(
+                padding: EdgeInsets.all(16.0),
+                child: Text('Akses Ditolak: Mohon update Firestore Security Rules untuk fitur Keluarga.', textAlign: TextAlign.center, style: TextStyle(color: Colors.red)),
+              ));
+            }
             return Center(child: Text('Error: ${snapshot.error}'));
           }
 
@@ -2144,12 +2238,11 @@ class _KategoriListScreenState extends State<KategoriListScreen> {
           ),
           TextButton(
             onPressed: () {
-              _firestore
-                  .collection('users')
-                  .doc(user?.uid)
-                  .collection('kategori')
-                  .doc(docId)
-                  .delete();
+              if (_isProMember && _currentUserFamilyId != null) {
+                _firestore.collection('families').doc(_currentUserFamilyId!).collection('kategori').doc(docId).delete();
+              } else {
+                _firestore.collection('users').doc(user?.uid).collection('kategori').doc(docId).delete();
+              }
               Navigator.pop(context);
               showToast(
                 'Data kategori berhasil dihapus',
@@ -2178,6 +2271,20 @@ class _AddKategoriScreenState extends State<AddKategoriScreen> {
   final user = FirebaseAuth.instance.currentUser;
   bool _isLoading = false;
 
+  bool _isProMember = false;
+  String? _currentUserFamilyId;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkFamilyStatus();
+  }
+
+  Future<void> _checkFamilyStatus() async {
+    _isProMember = await UserUtils.isCurrentUserProMember();
+    _currentUserFamilyId = await UserUtils.getCurrentUserFamilyId();
+  }
+
   @override
   void dispose() {
     _namaKategoriController.dispose();
@@ -2199,11 +2306,14 @@ class _AddKategoriScreenState extends State<AddKategoriScreen> {
       // Generate ID Kategori otomatis (KATEGORI + timestamp)
       final idKategori = 'KATEGORI${DateTime.now().millisecondsSinceEpoch}';
 
-      await _firestore
-          .collection('users')
-          .doc(user?.uid)
-          .collection('kategori')
-          .add({
+      CollectionReference collectionRef;
+      if (_isProMember && _currentUserFamilyId != null) {
+        collectionRef = _firestore.collection('families').doc(_currentUserFamilyId!).collection('kategori');
+      } else {
+        collectionRef = _firestore.collection('users').doc(user?.uid).collection('kategori');
+      }
+
+      await collectionRef.add({
         'idKategori': idKategori,
         'namaKategori': _namaKategoriController.text.trim(),
         'createdAt': FieldValue.serverTimestamp(),
@@ -2340,25 +2450,49 @@ class _SubKategoriListScreenState extends State<SubKategoriListScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final user = FirebaseAuth.instance.currentUser;
 
+  bool _isProMember = false;
+  String? _currentUserFamilyId;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkFamilyStatus();
+  }
+
+  Future<void> _checkFamilyStatus() async {
+    _isProMember = await UserUtils.isCurrentUserProMember();
+    _currentUserFamilyId = await UserUtils.getCurrentUserFamilyId();
+    setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
+    Query collectionRef;
+    if (_isProMember && _currentUserFamilyId != null) {
+      collectionRef = _firestore.collection('families').doc(_currentUserFamilyId!).collection('subkategori');
+    } else {
+      collectionRef = _firestore.collection('users').doc(user?.uid).collection('subkategori');
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Daftar Sub Kategori'),
         centerTitle: true,
       ),
       body: StreamBuilder<QuerySnapshot>(
-        stream: _firestore
-            .collection('users')
-            .doc(user?.uid)
-            .collection('subkategori')
-            .snapshots(),
+        stream: collectionRef.snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
 
           if (snapshot.hasError) {
+            if (snapshot.error.toString().contains('permission-denied')) {
+              return const Center(child: Padding(
+                padding: EdgeInsets.all(16.0),
+                child: Text('Akses Ditolak: Mohon update Firestore Security Rules untuk fitur Keluarga.', textAlign: TextAlign.center, style: TextStyle(color: Colors.red)),
+              ));
+            }
             return Center(child: Text('Error: ${snapshot.error}'));
           }
 
@@ -2426,11 +2560,20 @@ class _SubKategoriListScreenState extends State<SubKategoriListScreen> {
                           ),
                           subtitle: Text(
                               'ID: ${subKategori['idSubKategori'] ?? 'N/A'}'),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.delete, color: Colors.red),
-                            onPressed: () {
-                              _deleteSubKategori(subKategoriList[index].id);
-                            },
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: const Icon(Icons.edit, color: Colors.blue),
+                                onPressed: () => _editSubKategori(subKategoriList[index].id, subKategori['namaSubKategori'] ?? ''),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.delete, color: Colors.red),
+                                onPressed: () {
+                                  _deleteSubKategori(subKategoriList[index].id);
+                                },
+                              ),
+                            ],
                           ),
                         ),
                       );
@@ -2466,6 +2609,49 @@ class _SubKategoriListScreenState extends State<SubKategoriListScreen> {
     );
   }
 
+  void _editSubKategori(String docId, String currentName) {
+    final controller = TextEditingController(text: currentName);
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Edit Nama Sub Kategori'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(labelText: 'Nama Sub Kategori'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Batal'),
+          ),
+          TextButton(
+            onPressed: () async {
+              if (controller.text.trim().isEmpty) return;
+              Navigator.pop(context);
+              try {
+                if (_isProMember && _currentUserFamilyId != null) {
+                  await _firestore.collection('families').doc(_currentUserFamilyId!).collection('subkategori').doc(docId).update({
+                    'namaSubKategori': controller.text.trim(),
+                    'updatedAt': FieldValue.serverTimestamp(),
+                  });
+                } else {
+                  await _firestore.collection('users').doc(user?.uid).collection('subkategori').doc(docId).update({
+                    'namaSubKategori': controller.text.trim(),
+                    'updatedAt': FieldValue.serverTimestamp(),
+                  });
+                }
+                if (mounted) showToast('Nama sub kategori berhasil diubah', context: context);
+              } catch (e) {
+                if (mounted) showToast('Error: $e', context: context);
+              }
+            },
+            child: const Text('Simpan'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _deleteSubKategori(String docId) {
     showDialog(
       context: context,
@@ -2480,12 +2666,11 @@ class _SubKategoriListScreenState extends State<SubKategoriListScreen> {
           ),
           TextButton(
             onPressed: () {
-              _firestore
-                  .collection('users')
-                  .doc(user?.uid)
-                  .collection('subkategori')
-                  .doc(docId)
-                  .delete();
+              if (_isProMember && _currentUserFamilyId != null) {
+                _firestore.collection('families').doc(_currentUserFamilyId!).collection('subkategori').doc(docId).delete();
+              } else {
+                _firestore.collection('users').doc(user?.uid).collection('subkategori').doc(docId).delete();
+              }
               Navigator.pop(context);
               showToast(
                 'Data sub kategori berhasil dihapus',
@@ -2514,6 +2699,20 @@ class _AddSubKategoriScreenState extends State<AddSubKategoriScreen> {
   final user = FirebaseAuth.instance.currentUser;
   bool _isLoading = false;
 
+  bool _isProMember = false;
+  String? _currentUserFamilyId;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkFamilyStatus();
+  }
+
+  Future<void> _checkFamilyStatus() async {
+    _isProMember = await UserUtils.isCurrentUserProMember();
+    _currentUserFamilyId = await UserUtils.getCurrentUserFamilyId();
+  }
+
   @override
   void dispose() {
     _namaSubKategoriController.dispose();
@@ -2536,11 +2735,14 @@ class _AddSubKategoriScreenState extends State<AddSubKategoriScreen> {
       final idSubKategori =
           'SUBKATEGORI${DateTime.now().millisecondsSinceEpoch}';
 
-      await _firestore
-          .collection('users')
-          .doc(user?.uid)
-          .collection('subkategori')
-          .add({
+      CollectionReference collectionRef;
+      if (_isProMember && _currentUserFamilyId != null) {
+        collectionRef = _firestore.collection('families').doc(_currentUserFamilyId!).collection('subkategori');
+      } else {
+        collectionRef = _firestore.collection('users').doc(user?.uid).collection('subkategori');
+      }
+
+      await collectionRef.add({
         'idSubKategori': idSubKategori,
         'namaSubKategori': _namaSubKategoriController.text.trim(),
         'createdAt': FieldValue.serverTimestamp(),
@@ -2692,25 +2894,49 @@ class _BankListScreenState extends State<BankListScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final user = FirebaseAuth.instance.currentUser;
 
+  bool _isProMember = false;
+  String? _currentUserFamilyId;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkFamilyStatus();
+  }
+
+  Future<void> _checkFamilyStatus() async {
+    _isProMember = await UserUtils.isCurrentUserProMember();
+    _currentUserFamilyId = await UserUtils.getCurrentUserFamilyId();
+    setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
+    Query collectionRef;
+    if (_isProMember && _currentUserFamilyId != null) {
+      collectionRef = _firestore.collection('families').doc(_currentUserFamilyId!).collection('banks');
+    } else {
+      collectionRef = _firestore.collection('users').doc(user?.uid).collection('banks');
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Daftar Bank'),
         centerTitle: true,
       ),
       body: StreamBuilder<QuerySnapshot>(
-        stream: _firestore
-            .collection('users')
-            .doc(user?.uid)
-            .collection('banks')
-            .snapshots(),
+        stream: collectionRef.snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
 
           if (snapshot.hasError) {
+            if (snapshot.error.toString().contains('permission-denied')) {
+              return const Center(child: Padding(
+                padding: EdgeInsets.all(16.0),
+                child: Text('Akses Ditolak: Mohon update Firestore Security Rules untuk fitur Keluarga.', textAlign: TextAlign.center, style: TextStyle(color: Colors.red)),
+              ));
+            }
             return Center(child: Text('Error: ${snapshot.error}'));
           }
 
@@ -2776,11 +3002,20 @@ class _BankListScreenState extends State<BankListScreen> {
                             style: const TextStyle(fontWeight: FontWeight.bold),
                           ),
                           subtitle: Text('ID: ${bank['idBank'] ?? 'N/A'}'),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.delete, color: Colors.red),
-                            onPressed: () {
-                              _deleteBank(banks[index].id);
-                            },
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: const Icon(Icons.edit, color: Colors.blue),
+                                onPressed: () => _editBank(banks[index].id, bank['namaBanks'] ?? ''),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.delete, color: Colors.red),
+                                onPressed: () {
+                                  _deleteBank(banks[index].id);
+                                },
+                              ),
+                            ],
                           ),
                         ),
                       );
@@ -2816,6 +3051,49 @@ class _BankListScreenState extends State<BankListScreen> {
     );
   }
 
+  void _editBank(String docId, String currentName) {
+    final controller = TextEditingController(text: currentName);
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Edit Nama Bank'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(labelText: 'Nama Bank'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Batal'),
+          ),
+          TextButton(
+            onPressed: () async {
+              if (controller.text.trim().isEmpty) return;
+              Navigator.pop(context);
+              try {
+                if (_isProMember && _currentUserFamilyId != null) {
+                  await _firestore.collection('families').doc(_currentUserFamilyId!).collection('banks').doc(docId).update({
+                    'namaBanks': controller.text.trim(),
+                    'updatedAt': FieldValue.serverTimestamp(),
+                  });
+                } else {
+                  await _firestore.collection('users').doc(user?.uid).collection('banks').doc(docId).update({
+                    'namaBanks': controller.text.trim(),
+                    'updatedAt': FieldValue.serverTimestamp(),
+                  });
+                }
+                if (mounted) showToast('Nama bank berhasil diubah', context: context);
+              } catch (e) {
+                if (mounted) showToast('Error: $e', context: context);
+              }
+            },
+            child: const Text('Simpan'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _deleteBank(String docId) {
     showDialog(
       context: context,
@@ -2829,12 +3107,11 @@ class _BankListScreenState extends State<BankListScreen> {
           ),
           TextButton(
             onPressed: () {
-              _firestore
-                  .collection('users')
-                  .doc(user?.uid)
-                  .collection('banks')
-                  .doc(docId)
-                  .delete();
+              if (_isProMember && _currentUserFamilyId != null) {
+                _firestore.collection('families').doc(_currentUserFamilyId!).collection('banks').doc(docId).delete();
+              } else {
+                _firestore.collection('users').doc(user?.uid).collection('banks').doc(docId).delete();
+              }
               Navigator.pop(context);
               showToast(
                 'Data bank berhasil dihapus',
@@ -2863,6 +3140,20 @@ class _AddBankScreenState extends State<AddBankScreen> {
   final user = FirebaseAuth.instance.currentUser;
   bool _isLoading = false;
 
+  bool _isProMember = false;
+  String? _currentUserFamilyId;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkFamilyStatus();
+  }
+
+  Future<void> _checkFamilyStatus() async {
+    _isProMember = await UserUtils.isCurrentUserProMember();
+    _currentUserFamilyId = await UserUtils.getCurrentUserFamilyId();
+  }
+
   @override
   void dispose() {
     _namaBankController.dispose();
@@ -2884,13 +3175,17 @@ class _AddBankScreenState extends State<AddBankScreen> {
       // Generate ID Bank otomatis (BANK + timestamp)
       final idBank = 'BANK${DateTime.now().millisecondsSinceEpoch}';
 
-      await _firestore
-          .collection('users')
-          .doc(user?.uid)
-          .collection('banks')
-          .add({
+      CollectionReference collectionRef;
+      if (_isProMember && _currentUserFamilyId != null) {
+        collectionRef = _firestore.collection('families').doc(_currentUserFamilyId!).collection('banks');
+      } else {
+        collectionRef = _firestore.collection('users').doc(user?.uid).collection('banks');
+      }
+
+      await collectionRef.add({
         'idBank': idBank,
         'namaBanks': _namaBankController.text.trim(),
+        'userId': user?.uid, // Simpan userId untuk filter di Saldo Awal
         'createdAt': FieldValue.serverTimestamp(),
       });
 

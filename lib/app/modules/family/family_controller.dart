@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -6,16 +7,44 @@ import 'package:ethyf/utils/user_utils.dart';
 
 class FamilyController extends GetxController {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final user = FirebaseAuth.instance.currentUser;
+  User? get user => FirebaseAuth.instance.currentUser;
 
   Rx<FamilyModel?> currentFamily = Rx<FamilyModel?>(null);
   RxList<Map<String, String>> familyMembers = RxList<Map<String, String>>([]);
+  RxList<QueryDocumentSnapshot> pendingInvitations = RxList<QueryDocumentSnapshot>([]);
+  RxList<QueryDocumentSnapshot> sentInvitations = RxList<QueryDocumentSnapshot>([]);
   RxBool isLoading = false.obs;
 
   @override
   void onInit() {
     super.onInit();
     _fetchFamilyData();
+    _listenToInvitations();
+  }
+
+  void _listenToInvitations() {
+    if (user == null) return;
+    _firestore
+        .collection('invitations')
+        .where('inviteeUid', isEqualTo: user!.uid)
+        .where('status', isEqualTo: 'pending')
+        .snapshots()
+        .listen((snapshot) {
+      pendingInvitations.value = snapshot.docs;
+    }, onError: (e) {
+      print("Error listening to invitations: $e");
+    });
+  }
+
+  void _listenToSentInvitations(String familyId) {
+    _firestore
+        .collection('invitations')
+        .where('familyId', isEqualTo: familyId)
+        .where('status', isEqualTo: 'pending')
+        .snapshots()
+        .listen((snapshot) {
+      sentInvitations.value = snapshot.docs;
+    });
   }
 
   Future<void> _fetchFamilyData() async {
@@ -29,6 +58,7 @@ class FamilyController extends GetxController {
         if (familyDoc.exists) {
           final familyData = familyDoc.data()!;
           currentFamily.value = FamilyModel.fromMap(familyDoc.id, familyData);
+          _listenToSentInvitations(familyDoc.id); // Listen to outgoing invites
           // familyMembers.value = await UserUtils.getFamilyMembers(familyId); // Diganti dengan implementasi manual
 
           // Ambil nama anggota keluarga secara manual untuk memastikan data nama benar
@@ -60,13 +90,21 @@ class FamilyController extends GetxController {
     // For now, just add a dummy member if family exists
     if (currentFamily.value != null && user != null) {
       try {
+        // Validasi: Hanya owner yang bisa mengundang
+        if (user!.uid != currentFamily.value!.ownerUid) {
+          Get.snackbar("Akses Ditolak", "Hanya admin keluarga yang dapat mengundang anggota.");
+          return;
+        }
+
         String invitedUid = cleanInput;
+        String inviteeName = 'User';
 
         // Cek apakah input adalah email
         if (cleanInput.contains('@')) {
           final userQuery = await _firestore.collection('users').where('email', isEqualTo: cleanInput.toLowerCase()).limit(1).get();
           if (userQuery.docs.isNotEmpty) {
             invitedUid = userQuery.docs.first.id;
+            inviteeName = userQuery.docs.first.data()['fullName'] ?? 'User';
           } else {
             Get.snackbar("Error", "User dengan email '$cleanInput' tidak ditemukan.");
             return;
@@ -78,6 +116,7 @@ class FamilyController extends GetxController {
             Get.snackbar("Error", "User dengan UID tersebut tidak ditemukan.");
             return;
           }
+          inviteeName = invitedUserDoc.data()?['fullName'] ?? 'User';
         }
 
         if (invitedUid == user!.uid) {
@@ -85,28 +124,90 @@ class FamilyController extends GetxController {
           return;
         }
 
-        List<String> updatedMembers = List<String>.from(currentFamily.value!.memberUids);
-        if (!updatedMembers.contains(invitedUid)) {
-          updatedMembers.add(invitedUid);
-          await _firestore.collection('families').doc(currentFamily.value!.id).update({
-            'memberUids': updatedMembers,
-            'updatedAt': FieldValue.serverTimestamp(),
-          });
-
-          // Also update the invited user's document to link to this family
-          await _firestore.collection('users').doc(invitedUid).update({
-            'familyId': currentFamily.value!.id,
-            // 'isProMember': true, // This should be handled by the pro subscription logic
-          });
-
-          Get.snackbar("Success", "$cleanInput invited to family!");
-          _fetchFamilyData(); // Refresh data
-        } else {
-          Get.snackbar("Info", "$cleanInput is already a member.");
+        // Cek apakah user sudah menjadi anggota
+        if (currentFamily.value!.memberUids.contains(invitedUid)) {
+          Get.snackbar("Info", "User ini sudah menjadi anggota keluarga.");
+          return;
         }
+
+        // Cek apakah undangan sudah pernah dikirim
+        final existingInvite = await _firestore
+            .collection('invitations')
+            .where('familyId', isEqualTo: currentFamily.value!.id)
+            .where('inviteeUid', isEqualTo: invitedUid)
+            .where('status', isEqualTo: 'pending')
+            .get();
+
+        if (existingInvite.docs.isNotEmpty) {
+          Get.snackbar("Info", "Undangan sudah dikirim dan menunggu konfirmasi.");
+          return;
+        }
+
+        // Buat Undangan Baru
+        await _firestore.collection('invitations').add({
+          'familyId': currentFamily.value!.id,
+          'familyName': currentFamily.value!.familyName,
+          'inviterUid': user!.uid,
+          'inviterName': user!.displayName ?? 'Admin',
+          'inviteeUid': invitedUid,
+          'inviteeName': inviteeName, // Simpan nama penerima agar bisa ditampilkan
+          'status': 'pending',
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+
+        Get.snackbar("Sukses", "Undangan dikirim ke $cleanInput. Menunggu konfirmasi.");
       } catch (e) {
         Get.snackbar("Error", "Failed to invite member: $e");
       }
+    }
+  }
+
+  Future<void> acceptInvitation(String invitationId, String familyId) async {
+    isLoading.value = true;
+    try {
+      // 1. Tambahkan user ke keluarga
+      await _firestore.collection('families').doc(familyId).update({
+        'memberUids': FieldValue.arrayUnion([user!.uid]),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      // 2. Update data user
+      await _firestore.collection('users').doc(user!.uid).update({
+        'familyId': familyId,
+        'isProMember': true,
+      });
+
+      // 3. Update status undangan
+      await _firestore.collection('invitations').doc(invitationId).update({
+        'status': 'accepted',
+      });
+
+      Get.snackbar("Sukses", "Selamat! Anda berhasil bergabung dengan keluarga.");
+      _fetchFamilyData(); // Refresh data
+    } catch (e) {
+      Get.snackbar("Error", "Gagal menerima undangan: $e");
+    } finally {
+      isLoading.value = false;
+    }
+  }
+
+  Future<void> rejectInvitation(String invitationId) async {
+    try {
+      await _firestore.collection('invitations').doc(invitationId).update({
+        'status': 'rejected',
+      });
+      Get.snackbar("Info", "Undangan ditolak.");
+    } catch (e) {
+      Get.snackbar("Error", "Gagal menolak undangan: $e");
+    }
+  }
+
+  Future<void> cancelInvitation(String invitationId) async {
+    try {
+      await _firestore.collection('invitations').doc(invitationId).delete();
+      Get.snackbar("Sukses", "Undangan dibatalkan.");
+    } catch (e) {
+      Get.snackbar("Error", "Gagal membatalkan undangan: $e");
     }
   }
 
@@ -176,5 +277,57 @@ class FamilyController extends GetxController {
     } finally {
       isLoading.value = false;
     }
+  }
+
+  Future<void> removeMember(String memberUid) async {
+    if (user == null || currentFamily.value == null) {
+      Get.snackbar("Error", "Data keluarga tidak ditemukan.");
+      return;
+    }
+
+    // Security check: Only owner can remove members
+    if (user!.uid != currentFamily.value!.ownerUid) {
+      Get.snackbar("Akses Ditolak", "Hanya admin yang bisa menghapus anggota.");
+      return;
+    }
+
+    // Cannot remove self
+    if (memberUid == user!.uid) {
+      Get.snackbar("Info", "Admin tidak dapat menghapus diri sendiri.");
+      return;
+    }
+
+    // Show confirmation dialog
+    Get.defaultDialog(
+      title: "Hapus Anggota",
+      middleText: "Apakah Anda yakin ingin menghapus anggota ini dari keluarga? Tindakan ini tidak dapat dibatalkan.",
+      textConfirm: "Hapus",
+      textCancel: "Batal",
+      confirmTextColor: Colors.white,
+      onConfirm: () async {
+        Get.back(); // Close dialog
+        isLoading.value = true;
+        try {
+          // 1. Remove member from family's memberUids array
+          await _firestore.collection('families').doc(currentFamily.value!.id).update({
+            'memberUids': FieldValue.arrayRemove([memberUid]),
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+
+          // 2. Update the removed user's document to remove family link
+          await _firestore.collection('users').doc(memberUid).update({
+            'familyId': FieldValue.delete(),
+            'isProMember': FieldValue.delete(),
+          });
+
+          Get.snackbar("Sukses", "Anggota berhasil dihapus dari keluarga.");
+          _fetchFamilyData(); // Refresh the list
+        } catch (e) {
+          Get.snackbar("Error", "Gagal menghapus anggota: $e");
+        } finally {
+          isLoading.value = false;
+        }
+      },
+    );
   }
 }

@@ -2,27 +2,50 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Allow users to read other user documents (for invites), but only write to their own.
+    // Rules for individual user documents and their subcollections
     match /users/{userId} {
+      // Allow any authenticated user to read other user profiles (e.g., for inviting members)
       allow read: if request.auth != null;
-      allow write: if request.auth != null; // Dilonggarkan untuk uji coba (invite member)
+      // WARNING: This rule is too broad for production. It allows any authenticated user to write to ANY user document.
+      // For production, consider: `allow write: if request.auth != null && request.auth.uid == userId;`
+      allow write: if request.auth != null;
+
+      // Allow a user to read/write their own subcollections (banks, kategori, subkategori, transaksi)
+      // This applies to users who are not part of a family or whose family is not Pro.
+      match /{document=**} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
     }
 
-    // Allow users to manage their own bank accounts
-    match /users/{userId}/banks/{bankId} {
-    	allow read, write: if request.auth != null && request.auth.uid == userId;
-    }
-
-    // Rules for families
+    // Rules for family documents and their subcollections
     match /families/{familyId} {
-      // Dilonggarkan untuk uji coba (create & update family)
-      allow read, write: if request.auth != null;
+      // Allow any authenticated user to create a new family document
+      allow create: if request.auth != null;
+      // Allow read/write on the family document itself only if the user is a member of that family
+      allow read, write: if request.auth != null && request.auth.uid in resource.data.memberUids;
+
+      // Allow read/write on all subcollections (banks, kategori, subkategori, transaksi)
+      // within a family document, only if the user is a member of that family.
+      match /{subCollection}/{docId} {
+        allow read, write: if request.auth != null &&
+          request.auth.uid in get(/databases/$(database)/documents/families/$(familyId)).data.memberUids;
+      }
     }
 
-    // Rules for transactions within a family
-    match /families/{familyId}/transactions/{transactionId} {
-    	// Allow read, write if the user is a member of the family.
-      allow read, write: if request.auth != null && get(/databases/$(database)/documents/families/$(familyId)).data.memberUids.hasAny([request.auth.uid]);
+    // Rules for invitations
+    match /invitations/{invitationId} {
+      // Allow read if user is the invitee OR a member of the target family
+      allow read: if request.auth != null && (
+        resource.data.inviteeUid == request.auth.uid ||
+        (request.auth.uid in get(/databases/$(database)/documents/families/$(resource.data.familyId)).data.memberUids)
+      );
+      allow create: if request.auth != null;
+      allow update: if request.auth != null && (
+        resource.data.inviteeUid == request.auth.uid ||
+        resource.data.inviterUid == request.auth.uid
+      );
+      // Allow the inviter (admin) to cancel/delete the invitation
+      allow delete: if request.auth != null && resource.data.inviterUid == request.auth.uid;
     }
   }
 }

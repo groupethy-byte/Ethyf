@@ -9,6 +9,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import '../../../services/local_database_service.dart';
 import '../../../services/sync_service.dart';
 import '../../../utils/number_formatter.dart';
+import '../../../utils/user_utils.dart';
 
 class SaldoAwalScreen extends StatefulWidget {
   const SaldoAwalScreen({Key? key}) : super(key: key);
@@ -22,11 +23,30 @@ class _SaldoAwalScreenState extends State<SaldoAwalScreen> {
   final user = FirebaseAuth.instance.currentUser;
   late StreamSubscription<ConnectivityResult> _connectivitySubscription;
 
+  bool _isProMember = false;
+  String? _currentUserFamilyId;
+  List<Map<String, String>> _familyMembers = [];
+  String? _selectedMemberUid;
+
   @override
   void initState() {
     super.initState();
     _setupConnectivityListener();
     _initialSync();
+    _initializeFamilyData();
+  }
+
+  Future<void> _initializeFamilyData() async {
+    _isProMember = await UserUtils.isCurrentUserProMember();
+    _currentUserFamilyId = await UserUtils.getCurrentUserFamilyId();
+
+    if (_isProMember && _currentUserFamilyId != null) {
+      _familyMembers = await UserUtils.getFamilyMembers(_currentUserFamilyId!);
+      // Tambahkan opsi "Semua Anggota"
+      _familyMembers.insert(0, {'uid': 'all', 'name': 'Semua Anggota'});
+      _selectedMemberUid = 'all';
+    }
+    setState(() {});
   }
 
   void _setupConnectivityListener() {
@@ -69,7 +89,37 @@ class _SaldoAwalScreenState extends State<SaldoAwalScreen> {
         title: const Text('Saldo Awal'),
         centerTitle: true,
       ),
-      body: SafeArea(child: _buildBody()),
+      body: SafeArea(
+        child: Column(
+          children: [
+            if (_isProMember && _currentUserFamilyId != null && _familyMembers.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.all(12.0),
+                child: DropdownButtonFormField<String>(
+                  value: _selectedMemberUid,
+                  decoration: InputDecoration(
+                    labelText: 'Filter Saldo Anggota',
+                    prefixIcon: const Icon(Icons.family_restroom),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  ),
+                  items: _familyMembers.map((member) {
+                    return DropdownMenuItem(
+                      value: member['uid'],
+                      child: Text(member['name']!),
+                    );
+                  }).toList(),
+                  onChanged: (value) {
+                    setState(() => _selectedMemberUid = value);
+                  },
+                ),
+              ),
+            Expanded(child: _buildBody()),
+          ],
+        ),
+      ),
     );
   }
 
@@ -81,18 +131,27 @@ class _SaldoAwalScreenState extends State<SaldoAwalScreen> {
         final isOnline = snapshot.data ?? false;
 
         if (isOnline) {
+          Query collectionRef;
+          if (_isProMember && _currentUserFamilyId != null) {
+            collectionRef = _firestore.collection('families').doc(_currentUserFamilyId!).collection('banks');
+          } else {
+            collectionRef = _firestore.collection('users').doc(user?.uid).collection('banks');
+          }
+
           return StreamBuilder<QuerySnapshot>(
-            stream: _firestore
-                .collection('users')
-                .doc(user?.uid)
-                .collection('banks')
-                .snapshots(),
+            stream: collectionRef.snapshots(),
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(child: CircularProgressIndicator());
               }
 
               if (snapshot.hasError) {
+                if (snapshot.error.toString().contains('permission-denied')) {
+                  return const Center(child: Padding(
+                    padding: EdgeInsets.all(16.0),
+                    child: Text('Akses Ditolak: Mohon update Firestore Security Rules untuk fitur Keluarga.', textAlign: TextAlign.center, style: TextStyle(color: Colors.red)),
+                  ));
+                }
                 return _buildOfflineView();
               }
 
@@ -100,7 +159,17 @@ class _SaldoAwalScreenState extends State<SaldoAwalScreen> {
                 return _buildEmptyView();
               }
 
-              final banks = snapshot.data!.docs;
+              // Filter banks berdasarkan userId jika filter aktif
+              var banks = snapshot.data!.docs;
+              if (_isProMember && _selectedMemberUid != null && _selectedMemberUid != 'all') {
+                banks = banks.where((doc) {
+                  final data = doc.data() as Map<String, dynamic>;
+                  // Jika bank tidak memiliki userId (data lama), tampilkan saja atau sembunyikan sesuai kebutuhan.
+                  // Di sini kita asumsikan bank tanpa userId adalah milik bersama atau tidak difilter.
+                  return data['userId'] == _selectedMemberUid || data['userId'] == null;
+                }).toList();
+              }
+
               return _buildBanksList(banks);
             },
           );
@@ -265,13 +334,19 @@ class _SaldoAwalScreenState extends State<SaldoAwalScreen> {
 
   Future<Map<String, dynamic>> _calculateSaldoSementara(String bankId) async {
     try {
+      DocumentReference bankRef;
+      Query transaksiQuery;
+
+      if (_isProMember && _currentUserFamilyId != null) {
+        bankRef = _firestore.collection('families').doc(_currentUserFamilyId!).collection('banks').doc(bankId);
+        transaksiQuery = _firestore.collection('families').doc(_currentUserFamilyId!).collection('transaksi');
+      } else {
+        bankRef = _firestore.collection('users').doc(user?.uid).collection('banks').doc(bankId);
+        transaksiQuery = _firestore.collection('users').doc(user?.uid).collection('transaksi');
+      }
+
       // Ambil saldo awal
-      final bankDoc = await _firestore
-          .collection('users')
-          .doc(user?.uid)
-          .collection('banks')
-          .doc(bankId)
-          .get();
+      final bankDoc = await bankRef.get();
 
       if (!bankDoc.exists) return {'saldo': 0, 'hasTransactions': false};
 
@@ -283,10 +358,7 @@ class _SaldoAwalScreenState extends State<SaldoAwalScreen> {
       }
 
       // Ambil semua transaksi untuk bank ini
-      final transaksiSnapshot = await _firestore
-          .collection('users')
-          .doc(user?.uid)
-          .collection('transaksi')
+      final transaksiSnapshot = await transaksiQuery
           .where('bankId', isEqualTo: bankId)
           .get();
 
@@ -531,12 +603,14 @@ class _SaldoAwalScreenState extends State<SaldoAwalScreen> {
 
       final saldo = int.parse(saldoText.replaceAll('.', ''));
 
-      await _firestore
-          .collection('users')
-          .doc(user?.uid)
-          .collection('banks')
-          .doc(bankId)
-          .update({
+      DocumentReference bankRef;
+      if (_isProMember && _currentUserFamilyId != null) {
+        bankRef = _firestore.collection('families').doc(_currentUserFamilyId!).collection('banks').doc(bankId);
+      } else {
+        bankRef = _firestore.collection('users').doc(user?.uid).collection('banks').doc(bankId);
+      }
+
+      await bankRef.update({
         'saldoAwal': saldo,
         'updatedAt': FieldValue.serverTimestamp(),
       });
