@@ -1336,6 +1336,13 @@ class _HomeScreenState extends State<HomeScreen> {
                           .snapshots()
                       : const Stream.empty(),
                   builder: (context, snapshot) {
+                    if (snapshot.hasError) {
+                      // Ini akan mencetak link pembuatan index di console jika index belum ada
+                      print("Error Undangan: ${snapshot.error}");
+                    }
+                    if (snapshot.hasData) {
+                      print("DEBUG BADGE: Ditemukan ${snapshot.data!.docs.length} undangan untuk ${user?.uid}");
+                    }
                     if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                       return const SizedBox.shrink();
                     }

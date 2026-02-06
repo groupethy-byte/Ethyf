@@ -26,6 +26,17 @@ class FamilyManagementPage extends GetView<FamilyController> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // --- DEBUG INFO (Hapus nanti jika sudah fix) ---
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                margin: const EdgeInsets.only(bottom: 15),
+                color: Colors.yellow.shade100,
+                child: SelectableText(
+                  'DEBUG UID ANDA: ${controller.user?.uid}\n(Pastikan Admin mengundang UID ini)',
+                  style: const TextStyle(fontSize: 12, fontFamily: 'monospace', color: Colors.black87),
+                ),
+              ),
               // Bagian Undangan Masuk
               if (invitations.isNotEmpty) ...[
                 const Text(

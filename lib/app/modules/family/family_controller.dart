@@ -24,6 +24,7 @@ class FamilyController extends GetxController {
 
   void _listenToInvitations() {
     if (user == null) return;
+    print("DEBUG: Memulai listener undangan untuk UID: ${user!.uid}");
     _firestore
         .collection('invitations')
         .where('inviteeUid', isEqualTo: user!.uid)
@@ -31,6 +32,7 @@ class FamilyController extends GetxController {
         .snapshots()
         .listen((snapshot) {
       pendingInvitations.value = snapshot.docs;
+      print("DEBUG: Undangan ditemukan: ${snapshot.docs.length}");
     }, onError: (e) {
       print("Error listening to invitations: $e");
     });
@@ -89,6 +91,7 @@ class FamilyController extends GetxController {
     print("Inviting $cleanInput to family ${currentFamily.value?.familyName}");
     // For now, just add a dummy member if family exists
     if (currentFamily.value != null && user != null) {
+      DocumentReference<Map<String, dynamic>>? invitationRef; // Deklarasikan di sini agar bisa diakses di catch
       try {
         // Validasi: Hanya owner yang bisa mengundang
         if (user!.uid != currentFamily.value!.ownerUid) {
@@ -130,21 +133,22 @@ class FamilyController extends GetxController {
           return;
         }
 
-        // Cek apakah undangan sudah pernah dikirim
-        final existingInvite = await _firestore
-            .collection('invitations')
-            .where('familyId', isEqualTo: currentFamily.value!.id)
-            .where('inviteeUid', isEqualTo: invitedUid)
-            .where('status', isEqualTo: 'pending')
-            .get();
+        // Buat ID undangan yang dapat diprediksi
+        final invitationId = '${currentFamily.value!.id}_$invitedUid';
+        invitationRef = _firestore.collection('invitations').doc(invitationId);
 
-        if (existingInvite.docs.isNotEmpty) {
+        // Cek apakah undangan sudah pernah dikirim dan masih pending
+        final existingInviteDoc = await invitationRef.get();
+
+        if (existingInviteDoc.exists && existingInviteDoc.data()?['status'] == 'pending') {
           Get.snackbar("Info", "Undangan sudah dikirim dan menunggu konfirmasi.");
           return;
         }
 
+        print("DEBUG: Mengirim undangan ke UID: $invitedUid (Nama: $inviteeName)");
+
         // Buat Undangan Baru
-        await _firestore.collection('invitations').add({
+        await invitationRef.set({
           'familyId': currentFamily.value!.id,
           'familyName': currentFamily.value!.familyName,
           'inviterUid': user!.uid,
@@ -157,35 +161,70 @@ class FamilyController extends GetxController {
 
         Get.snackbar("Sukses", "Undangan dikirim ke $cleanInput. Menunggu konfirmasi.");
       } catch (e) {
-        Get.snackbar("Error", "Failed to invite member: $e");
+        // Log yang lebih detail untuk debugging
+        print("--- INVITE MEMBER FAILED ---");
+        print("Error: $e");
+        print("Current User UID: ${user?.uid}");
+        print("Current Family ID: ${currentFamily.value?.id}");
+        print("Current Family Owner UID: ${currentFamily.value?.ownerUid}");        
+        print("Data yang dikirim: ${invitationRef?.path ?? 'N/A'}");
+        print("----------------------------");
+        Get.snackbar("Error", "Gagal mengundang anggota. Lihat log di console untuk detail.");
       }
     }
   }
 
   Future<void> acceptInvitation(String invitationId, String familyId) async {
+    if (user == null) {
+      Get.snackbar("Error", "User not logged in.");
+      return;
+    }
     isLoading.value = true;
+    
+    // Gunakan WriteBatch untuk operasi atomik (semua berhasil atau semua gagal)
+    final batch = _firestore.batch();
+
+    // DEBUG: Cek format ID Undangan
+    final expectedInvitationId = '${familyId}_${user!.uid}';
+    if (invitationId != expectedInvitationId) {
+      print("WARNING: ID Undangan tidak sesuai format baru.");
+      print("Received: $invitationId");
+      print("Expected: $expectedInvitationId");
+    }
+
     try {
-      // 1. Tambahkan user ke keluarga
-      await _firestore.collection('families').doc(familyId).update({
+      // 1. Siapkan update untuk dokumen keluarga (menambahkan user)
+      final familyRef = _firestore.collection('families').doc(familyId);
+      batch.update(familyRef, {
         'memberUids': FieldValue.arrayUnion([user!.uid]),
         'updatedAt': FieldValue.serverTimestamp(),
       });
 
-      // 2. Update data user
-      await _firestore.collection('users').doc(user!.uid).update({
+      // 2. Siapkan update untuk dokumen user (menambahkan link ke keluarga)
+      final userRef = _firestore.collection('users').doc(user!.uid);
+      batch.update(userRef, {
         'familyId': familyId,
         'isProMember': true,
       });
 
-      // 3. Update status undangan
-      await _firestore.collection('invitations').doc(invitationId).update({
+      // 3. Siapkan update untuk dokumen undangan (mengubah status)
+      final invitationRef = _firestore.collection('invitations').doc(invitationId);
+      batch.update(invitationRef, {
         'status': 'accepted',
+        'updatedAt': FieldValue.serverTimestamp(), // Tambahkan jejak waktu
       });
+
+      // Jalankan semua operasi tulis sekaligus
+      await batch.commit();
 
       Get.snackbar("Sukses", "Selamat! Anda berhasil bergabung dengan keluarga.");
       _fetchFamilyData(); // Refresh data
     } catch (e) {
       Get.snackbar("Error", "Gagal menerima undangan: $e");
+      // Log yang lebih detail untuk debugging
+      print("--- ACCEPT INVITATION FAILED ---");
+      print("Error: $e");
+      print("---------------------------------");
     } finally {
       isLoading.value = false;
     }
