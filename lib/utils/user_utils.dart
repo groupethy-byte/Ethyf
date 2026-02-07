@@ -52,7 +52,7 @@ class UserUtils {
           if (userDoc.exists) {
             members.add({
               'uid': uid,
-              'name': userDoc.data()?['displayName'] ?? 'Anggota Keluarga', // Assuming 'displayName' field in user doc
+              'name': userDoc.data()?['fullName'] ?? 'Anggota Keluarga', // Assuming 'displayName' field in user doc
             });
           }
         }

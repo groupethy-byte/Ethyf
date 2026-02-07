@@ -32,31 +32,21 @@ class _TransaksiScreenState extends State<TransaksiScreen> {
 
   bool _isProMember = false;
   String? _currentUserFamilyId;
-  List<Map<String, String>> _familyMembers = [];
-  String? _selectedFilterMemberUid; // To store the UID of the selected family member for filtering
+  // Variabel state untuk filter anggota keluarga telah dihapus
 
   @override
   void initState() {
     super.initState();
     _syncData();
-    _initializeTransaksiFamilyData(); // New method call
+    _checkProStatus(); // Simplified initializer
   }
 
-  Future<void> _initializeTransaksiFamilyData() async {
+  Future<void> _checkProStatus() async {
     _isProMember = await UserUtils.isCurrentUserProMember();
     _currentUserFamilyId = await UserUtils.getCurrentUserFamilyId();
-
-    if (_isProMember && _currentUserFamilyId != null) {
-      _familyMembers = await UserUtils.getFamilyMembers(_currentUserFamilyId!);
-      // Add an "All Members" option
-      _familyMembers.insert(0, {'uid': 'all', 'name': 'Semua Anggota'});
-      // Set default filter to current user or "all"
-      _selectedFilterMemberUid = _familyMembers.firstWhere(
-        (member) => member['uid'] == user?.uid,
-        orElse: () => {'uid': 'all', 'name': 'Semua Anggota'},
-      )['uid'];
+    if (mounted) {
+      setState(() {}); // Refresh UI after data is loaded
     }
-    setState(() {}); // Refresh UI after data is loaded
   }
 
   Future<void> _syncData() async {
@@ -97,35 +87,7 @@ class _TransaksiScreenState extends State<TransaksiScreen> {
         children: [
           _buildDateFilter(),
           // Filter Anggota Keluarga (Hanya muncul jika Pro dan ada familyId)
-          if (_isProMember && _currentUserFamilyId != null && _familyMembers.isNotEmpty) ...[
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
-              child: DropdownButtonFormField<String>(
-                value: _selectedFilterMemberUid,
-                decoration: InputDecoration(
-                  labelText: 'Filter Anggota',
-                  prefixIcon: const Icon(Icons.filter_list),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                ),
-                items: _familyMembers
-                    .map((member) {
-                      return DropdownMenuItem(
-                        value: member['uid'],
-                        child: Text(member['name']!),
-                      );
-                    })
-                    .toList(),
-                onChanged: (value) {
-                  setState(() {
-                    _selectedFilterMemberUid = value;
-                  });
-                },
-              ),
-            ),
-            const SizedBox(height: 10),
-          ],
+          // Widget filter dihapus sesuai permintaan
           Expanded(
             child: FutureBuilder<bool>(
         future: SyncService.isOnline(),
@@ -135,20 +97,21 @@ class _TransaksiScreenState extends State<TransaksiScreen> {
           if (isOnline) {
             Query collectionRef;
             if (_isProMember && _currentUserFamilyId != null) {
+              // Jika Pro, ambil dari koleksi family, TAPI lgsg filter by userId saat ini
               collectionRef = _firestore
                   .collection('families')
                   .doc(_currentUserFamilyId!)
-                  .collection('transaksi');
+                  .collection('transaksi')
+                  .where('userId', isEqualTo: user?.uid);
             } else {
+              // Jika bukan pro, ambil dari koleksi user
               collectionRef = _firestore
                   .collection('users')
                   .doc(user?.uid)
                   .collection('transaksi');
             }
 
-            if (_selectedFilterMemberUid != null && _selectedFilterMemberUid != 'all') {
-              collectionRef = collectionRef.where('userId', isEqualTo: _selectedFilterMemberUid);
-            }
+            // Logic filter berdasarkan dropdown telah dihapus
 
             return StreamBuilder<QuerySnapshot>(
               stream: collectionRef
@@ -741,26 +704,21 @@ class _AddTransaksiScreenState extends State<AddTransaksiScreen> {
 
   bool _isProMember = false;
   String? _currentUserFamilyId;
-  List<Map<String, String>> _familyMembers = [];
-  String? _selectedFamilyMemberUid; // To store the UID of the selected family member for the transaction
+  // Variabel state untuk pilihan anggota keluarga telah dihapus
 
   @override
   void initState() {
     super.initState();
     _currentType = widget.type;
-    _initializeFamilyData(); // New method call
+    _checkProStatus(); // Simplified initializer
   }
 
-  Future<void> _initializeFamilyData() async {
+  Future<void> _checkProStatus() async {
     _isProMember = await UserUtils.isCurrentUserProMember();
     _currentUserFamilyId = await UserUtils.getCurrentUserFamilyId();
-
-    if (_isProMember && _currentUserFamilyId != null) {
-      _familyMembers = await UserUtils.getFamilyMembers(_currentUserFamilyId!);
-      // Set the current user as the default selected family member
-      _selectedFamilyMemberUid = user?.uid;
+    if (mounted) {
+      setState(() {});
     }
-    setState(() {}); // Refresh UI after data is loaded
   }
 
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -895,12 +853,19 @@ class _AddTransaksiScreenState extends State<AddTransaksiScreen> {
                     const SizedBox(height: 15),
                     Expanded(
                       child: StreamBuilder<QuerySnapshot>(
-                        stream: _firestore
-                            .collection('users')
-                            .doc(user?.uid)
-                            .collection('banks')
-                            .orderBy('namaBanks')
-                            .snapshots(),
+                        stream: (_isProMember && _currentUserFamilyId != null)
+                            ? _firestore
+                                .collection('families')
+                                .doc(_currentUserFamilyId!)
+                                .collection('banks')
+                                .orderBy('namaBanks')
+                                .snapshots()
+                            : _firestore
+                                .collection('users')
+                                .doc(user?.uid)
+                                .collection('banks')
+                                .orderBy('namaBanks')
+                                .snapshots(),
                         builder: (context, snapshot) {
                           if (snapshot.connectionState ==
                               ConnectionState.waiting) {
@@ -1027,12 +992,19 @@ class _AddTransaksiScreenState extends State<AddTransaksiScreen> {
                     const SizedBox(height: 15),
                     Expanded(
                       child: StreamBuilder<QuerySnapshot>(
-                        stream: _firestore
-                            .collection('users')
-                            .doc(user?.uid)
-                            .collection('subkategori')
-                            .orderBy('namaSubKategori')
-                            .snapshots(),
+                        stream: (_isProMember && _currentUserFamilyId != null)
+                            ? _firestore
+                                .collection('families')
+                                .doc(_currentUserFamilyId!)
+                                .collection('subkategori')
+                                .orderBy('namaSubKategori')
+                                .snapshots()
+                            : _firestore
+                                .collection('users')
+                                .doc(user?.uid)
+                                .collection('subkategori')
+                                .orderBy('namaSubKategori')
+                                .snapshots(),
                         builder: (context, snapshot) {
                           if (snapshot.connectionState ==
                               ConnectionState.waiting) {
@@ -1224,39 +1196,7 @@ class _AddTransaksiScreenState extends State<AddTransaksiScreen> {
               const SizedBox(height: 20),
 
               // Pilihan Anggota Keluarga (Hanya muncul jika Pro dan ada familyId)
-              if (_isProMember && _currentUserFamilyId != null && _familyMembers.isNotEmpty) ...[
-                const Text(
-                  'Anggota Keluarga',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.grey,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                DropdownButtonFormField<String>(
-                  value: _selectedFamilyMemberUid,
-                  hint: const Text('Pilih Anggota Keluarga'),
-                  decoration: InputDecoration(
-                    prefixIcon: const Icon(Icons.person),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
-                  items: _familyMembers
-                      .map((member) {
-                        return DropdownMenuItem(
-                          value: member['uid'],
-                          child: Text(member['name']!),
-                        );
-                      })
-                      .toList(),
-                  onChanged: (value) {
-                    setState(() => _selectedFamilyMemberUid = value);
-                  },
-                ),
-                const SizedBox(height: 20),
-              ],
+              // Widget ini dihapus sesuai permintaan
 
               // Kategori (dari database)
               if (widget.type != 'pengeluaran' && widget.type != 'pendapatan') ...[
@@ -1585,7 +1525,6 @@ class _AddTransaksiScreenState extends State<AddTransaksiScreen> {
         }
       }
 
-      final String targetUserId = _isProMember && _selectedFamilyMemberUid != null ? _selectedFamilyMemberUid! : user.uid;
       CollectionReference transaksiCollection;
       String? transaksiFamilyId;
 
@@ -1607,7 +1546,7 @@ class _AddTransaksiScreenState extends State<AddTransaksiScreen> {
         'fotoStruk': fotoStrukUrl,
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
-        'userId': targetUserId, // Set the correct userId
+        'userId': user.uid, // Set the correct userId, lgsg dari user yg login
         if (transaksiFamilyId != null) 'familyId': transaksiFamilyId, // Add familyId if available
       });
 
@@ -2135,6 +2074,9 @@ class _TransaksiDetailScreenState extends State<TransaksiDetailScreen> {
   String? _selectedBank;
   String? _selectedBankName;
 
+  bool _isProMember = false;
+  String? _currentUserFamilyId;
+
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final user = FirebaseAuth.instance.currentUser;
 
@@ -2153,6 +2095,15 @@ class _TransaksiDetailScreenState extends State<TransaksiDetailScreen> {
     _selectedSubKategori = widget.data['subKategoriId'];
     if (_selectedSubKategori != null) {
       _fetchSubKategoriName();
+    }
+    _checkProStatus();
+  }
+
+  Future<void> _checkProStatus() async {
+    _isProMember = await UserUtils.isCurrentUserProMember();
+    _currentUserFamilyId = await UserUtils.getCurrentUserFamilyId();
+    if (mounted) {
+      setState(() {});
     }
   }
 
@@ -2374,12 +2325,19 @@ class _TransaksiDetailScreenState extends State<TransaksiDetailScreen> {
                     const SizedBox(height: 15),
                     Expanded(
                       child: StreamBuilder<QuerySnapshot>(
-                        stream: _firestore
-                            .collection('users')
-                            .doc(user?.uid)
-                            .collection('subkategori')
-                            .orderBy('namaSubKategori')
-                            .snapshots(),
+                        stream: (_isProMember && _currentUserFamilyId != null)
+                            ? _firestore
+                                .collection('families')
+                                .doc(_currentUserFamilyId!)
+                                .collection('subkategori')
+                                .orderBy('namaSubKategori')
+                                .snapshots()
+                            : _firestore
+                                .collection('users')
+                                .doc(user?.uid)
+                                .collection('subkategori')
+                                .orderBy('namaSubKategori')
+                                .snapshots(),
                         builder: (context, snapshot) {
                           if (snapshot.connectionState ==
                               ConnectionState.waiting) {
