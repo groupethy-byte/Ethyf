@@ -8,11 +8,14 @@ service cloud.firestore {
       allow read: if request.auth != null;
       // Allow a user to write ONLY to their own document.
       allow write: if request.auth != null && request.auth.uid == userId;
-      // Allow a user to read/write their own subcollections (banks, kategori, subkategori, transaksi)
-      // This applies to users who are not part of a family or whose family is not Pro.
-      match /{document=**} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
-      }
+      
+      // Master Data (Banks, Kategori, Subkategori): Allow read by any auth user (so family members can see names)
+      match /banks/{document=**} { allow read: if request.auth != null; allow write: if request.auth.uid == userId; }
+      match /kategori/{document=**} { allow read: if request.auth != null; allow write: if request.auth.uid == userId; }
+      match /subkategori/{document=**} { allow read: if request.auth != null; allow write: if request.auth.uid == userId; }
+
+      // Private Data (Transaksi Personal): Only owner can read/write
+      match /transaksi/{document=**} { allow read, write: if request.auth != null && request.auth.uid == userId; }
     }
 
     // Rules for family documents and their subcollections
@@ -46,8 +49,8 @@ service cloud.firestore {
             request.auth.uid == resource.data.ownerUid
         );
 
-      // Deleting families is disallowed for now to prevent accidental data loss.
-      allow delete: if false;
+      // Allow delete if the user is the owner
+      allow delete: if request.auth.uid == resource.data.ownerUid;
 
       // Allow read/write on all subcollections (banks, kategori, subkategori, transaksi)
       // within a family document, only if the user is a member of that family.

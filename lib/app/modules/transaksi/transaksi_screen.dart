@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
@@ -25,27 +26,91 @@ class TransaksiScreen extends StatefulWidget {
 
 class _TransaksiScreenState extends State<TransaksiScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final user = FirebaseAuth.instance.currentUser;
+  User? get user => FirebaseAuth.instance.currentUser;
 
   DateTime _startDate = DateTime(DateTime.now().year, DateTime.now().month, 1);
-  DateTime _endDate = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day, 23, 59, 59);
+  DateTime _endDate = DateTime(DateTime.now().year, DateTime.now().month + 1, 0, 23, 59, 59);
 
   bool _isProMember = false;
   String? _currentUserFamilyId;
-  // Variabel state untuk filter anggota keluarga telah dihapus
+  List<Map<String, dynamic>> _familyMembers = [];
+  String? _selectedMemberUid;
+  StreamSubscription<DocumentSnapshot>? _userSubscription;
+
 
   @override
   void initState() {
     super.initState();
     _syncData();
-    _checkProStatus(); // Simplified initializer
+    _listenToUserStatus();
   }
 
-  Future<void> _checkProStatus() async {
-    _isProMember = await UserUtils.isCurrentUserProMember();
-    _currentUserFamilyId = await UserUtils.getCurrentUserFamilyId();
-    if (mounted) {
-      setState(() {}); // Refresh UI after data is loaded
+  void _listenToUserStatus() {
+    if (user == null) return;
+    _userSubscription = _firestore.collection('users').doc(user!.uid).snapshots().listen((snapshot) {
+      if (snapshot.exists) {
+        final data = snapshot.data() as Map<String, dynamic>;
+        final newIsPro = data['isProMember'] == true;
+        final rawFamilyId = data['familyId'] as String?;
+        final newFamilyId = (rawFamilyId != null && rawFamilyId.trim().isNotEmpty) ? rawFamilyId.trim() : null;
+
+        if (newIsPro != _isProMember || newFamilyId != _currentUserFamilyId) {
+          if (mounted) {
+            setState(() {
+              _isProMember = newIsPro;
+              _currentUserFamilyId = newFamilyId;
+            });
+          }
+
+          if (_isProMember && _currentUserFamilyId != null) {
+            _fetchFamilyMembers();
+          }
+        } else if (_isProMember && _currentUserFamilyId != null && _familyMembers.isEmpty) {
+          _fetchFamilyMembers();
+        }
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _userSubscription?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _fetchFamilyMembers() async {
+    try {
+      final familyDoc = await _firestore.collection('families').doc(_currentUserFamilyId).get();
+      if (familyDoc.exists) {
+        List<String> memberUids = [];
+        try {
+          // Menggunakan FamilyModel untuk parsing data
+          final family = FamilyModel.fromMap(familyDoc.id, familyDoc.data()!);
+          memberUids = family.memberUids;
+        } catch (e) {
+          // Fallback manual jika parsing model gagal (misal timestamp null)
+          memberUids = List<String>.from(familyDoc.data()?['memberUids'] ?? []);
+        }
+        
+        List<Map<String, dynamic>> members = [];
+
+        for (String uid in memberUids) {
+          final userDoc = await _firestore.collection('users').doc(uid).get();
+          String name = userDoc.data()?['fullName'] ?? 'Unknown';
+          if (name == 'Unknown' || name.isEmpty) {
+            name = userDoc.data()?['email'] ?? 'Anggota';
+          }
+          members.add({'uid': uid, 'name': name});
+        }
+
+        if (mounted) {
+          setState(() {
+            _familyMembers = members;
+          });
+        }
+      }
+    } catch (e) {
+      print("Error fetching members: $e");
     }
   }
 
@@ -86,80 +151,107 @@ class _TransaksiScreenState extends State<TransaksiScreen> {
       body: Column(
         children: [
           _buildDateFilter(),
-          // Filter Anggota Keluarga (Hanya muncul jika Pro dan ada familyId)
-          // Widget filter dihapus sesuai permintaan
+          _buildFamilyFilter(),
           Expanded(
-            child: FutureBuilder<bool>(
-        future: SyncService.isOnline(),
-        builder: (context, snapshot) {
-          final isOnline = snapshot.data ?? false;
-
-          if (isOnline) {
-            Query collectionRef;
-            if (_isProMember && _currentUserFamilyId != null) {
-              // Jika Pro, ambil dari koleksi family, TAPI lgsg filter by userId saat ini
-              collectionRef = _firestore
-                  .collection('families')
-                  .doc(_currentUserFamilyId!)
-                  .collection('transaksi')
-                  .where('userId', isEqualTo: user?.uid);
-            } else {
-              // Jika bukan pro, ambil dari koleksi user
-              collectionRef = _firestore
-                  .collection('users')
-                  .doc(user?.uid)
-                  .collection('transaksi');
-            }
-
-            // Logic filter berdasarkan dropdown telah dihapus
-
-            return StreamBuilder<QuerySnapshot>(
-              stream: collectionRef
-                  .orderBy('createdAt', descending: true)
-                  .snapshots(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
+            child: Builder(
+              builder: (context) {
+                if (user == null) {
+                  return const Center(child: Text('Silakan login kembali'));
                 }
 
-                if (snapshot.hasError) {
-                  print('Error: ${snapshot.error}');
-                  return _buildOfflineView();
+                Query collectionRef;
+                if (_isProMember && _currentUserFamilyId != null && _currentUserFamilyId!.isNotEmpty) {
+                  // Jika Pro, ambil dari koleksi family
+                  collectionRef = _firestore
+                      .collection('families')
+                      .doc(_currentUserFamilyId!)
+                      .collection('transaksi');
+                } else {
+                  // Jika bukan pro, ambil dari koleksi user
+                  collectionRef = _firestore
+                      .collection('users')
+                      .doc(user!.uid)
+                      .collection('transaksi');
                 }
 
-                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                  return _buildEmptyView();
-                }
+                return StreamBuilder<QuerySnapshot>(
+                  stream: collectionRef
+                      .orderBy('createdAt', descending: true)
+                      .snapshots(),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
 
-                // Filter by type
-                final filtered = snapshot.data!.docs.where((doc) {
-                  final data = doc.data() as Map<String, dynamic>;
-                  final transactionType = data['type'] ?? '';
-                  final rawTanggal = data['tanggal'];
-                  final DateTime tanggal = rawTanggal is Timestamp ? rawTanggal.toDate() : (rawTanggal is DateTime ? rawTanggal : DateTime.now());
+                    if (snapshot.hasError) {
+                      print('Error Stream Transaksi: ${snapshot.error}');
+                      // Jika error permission atau lainnya, coba tampilkan offline view
+                      // atau tampilkan pesan error untuk debugging
+                      return _buildOfflineView(); 
+                    }
 
-                  if (tanggal.isBefore(_startDate) || tanggal.isAfter(_endDate)) {
-                    return false;
-                  }
+                    if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                      return _buildEmptyView();
+                    }
 
-                  if (widget.type == 'pendapatan') {
-                    return transactionType == 'pendapatan';
-                  } else {
-                    return transactionType == 'pengeluaran' || transactionType == 'hutang';
-                  }
-                }).toList();
+                    // Filter by type
+                    final filtered = snapshot.data!.docs.where((doc) {
+                      final data = doc.data() as Map<String, dynamic>;
 
-                if (filtered.isEmpty) {
-                  return _buildEmptyView();
-                }
+                      // Filter User (Client Side)
+                      if (_isProMember && _selectedMemberUid != null) {
+                        if (data['userId'] != _selectedMemberUid) {
+                          return false;
+                        }
+                      }
 
-                return _buildTransaksiList(filtered);
+                      final transactionType = (data['type'] ?? '').toString();
+                      final rawTanggal = data['tanggal'];
+                      final DateTime tanggal = rawTanggal is Timestamp ? rawTanggal.toDate() : (rawTanggal is DateTime ? rawTanggal : DateTime.now());
+
+                      if (tanggal.isBefore(_startDate) || tanggal.isAfter(_endDate)) {
+                        return false;
+                      }
+
+                      if (widget.type == 'pendapatan') {
+                        return transactionType == 'pendapatan';
+                      } else {
+                        return transactionType == 'pengeluaran' || transactionType == 'hutang';
+                      }
+                    }).toList();
+
+                    // Hitung Total Nilai
+                    int totalNilai = 0;
+                    for (var doc in filtered) {
+                      final data = doc.data() as Map<String, dynamic>;
+                      final rawNilai = data['nilai'];
+                      int nilai = 0;
+                      if (rawNilai is num) {
+                        nilai = rawNilai.toInt();
+                      } else if (rawNilai is String) {
+                        nilai = int.tryParse(rawNilai.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
+                      }
+                      totalNilai += nilai;
+                    }
+
+                    if (filtered.isEmpty) {
+                      return Column(
+                        children: [
+                          _buildSummaryCard(totalNilai),
+                          Expanded(child: _buildEmptyView()),
+                        ],
+                      );
+                    }
+
+                    return Column(
+                      children: [
+                        _buildSummaryCard(totalNilai),
+                        Expanded(child: _buildTransaksiList(filtered)),
+                      ],
+                    );
+                  },
+                );
               },
-            );
-          } else {
-            return _buildOfflineView();
-          }
-        },
             ),
           ),
         ],
@@ -179,33 +271,29 @@ class _TransaksiScreenState extends State<TransaksiScreen> {
     );
 
     try {
-      // Fetch master data untuk mapping ID ke Nama
-      final banksSnap = await _firestore.collection('users').doc(user?.uid).collection('banks').get();
-      final Map<String, String> bankMap = {
-        for (var doc in banksSnap.docs) doc.id: (doc.data()['namaBanks'] ?? 'Unknown').toString()
-      };
+      // 1. Tentukan koleksi transaksi (Family atau User)
+      Query collectionRef;
+      if (_isProMember && _currentUserFamilyId != null && _currentUserFamilyId!.isNotEmpty) {
+        collectionRef = _firestore.collection('families').doc(_currentUserFamilyId!).collection('transaksi');
+      } else {
+        collectionRef = _firestore.collection('users').doc(user!.uid).collection('transaksi');
+      }
 
-      final catSnap = await _firestore.collection('users').doc(user?.uid).collection('kategori').get();
-      final Map<String, String> categoryMap = {
-        for (var doc in catSnap.docs) doc.id: (doc.data()['namaKategori'] ?? '-').toString()
-      };
+      // 2. Fetch Transactions
+      final snapshot = await collectionRef.orderBy('createdAt', descending: true).get();
 
-      final subCatSnap = await _firestore.collection('users').doc(user?.uid).collection('subkategori').get();
-      final Map<String, String> subCategoryMap = {
-        for (var doc in subCatSnap.docs) doc.id: (doc.data()['namaSubKategori'] ?? '-').toString()
-      };
-
-      // Fetch transactions
-      final snapshot = await _firestore
-          .collection('users')
-          .doc(user?.uid)
-          .collection('transaksi')
-          .orderBy('createdAt', descending: true)
-          .get();
-
+      // 3. Filter Transactions
       final filtered = snapshot.docs.where((doc) {
-        final data = doc.data();
-        final transactionType = data['type'] ?? '';
+        final data = doc.data() as Map<String, dynamic>;
+
+        // Filter User (Client Side)
+        if (_isProMember && _selectedMemberUid != null) {
+          if (data['userId'] != _selectedMemberUid) {
+            return false;
+          }
+        }
+
+        final transactionType = (data['type'] ?? '').toString();
         final rawTanggal = data['tanggal'];
         final DateTime tanggal = rawTanggal is Timestamp ? rawTanggal.toDate() : (rawTanggal is DateTime ? rawTanggal : DateTime.now());
 
@@ -228,6 +316,36 @@ class _TransaksiScreenState extends State<TransaksiScreen> {
         return;
       }
 
+      // 4. Collect User IDs involved to fetch their Master Data
+      Set<String> userIds = {user!.uid};
+      for (var doc in filtered) {
+        final data = doc.data() as Map<String, dynamic>;
+        if (data['userId'] != null) userIds.add(data['userId']);
+      }
+
+      // 5. Fetch Master Data for ALL involved users
+      Map<String, Map<String, String>> userBankMap = {};
+      Map<String, Map<String, String>> userCategoryMap = {};
+      Map<String, Map<String, String>> userSubCategoryMap = {};
+
+      for (String uid in userIds) {
+        // Banks
+        final banksSnap = await _firestore.collection('users').doc(uid).collection('banks').get();
+        userBankMap[uid] = {
+          for (var doc in banksSnap.docs) doc.id: (doc.data()['namaBanks'] ?? 'Unknown').toString()
+        };
+        // Categories
+        final catSnap = await _firestore.collection('users').doc(uid).collection('kategori').get();
+        userCategoryMap[uid] = {
+          for (var doc in catSnap.docs) doc.id: (doc.data()['namaKategori'] ?? '-').toString()
+        };
+        // SubCategories
+        final subCatSnap = await _firestore.collection('users').doc(uid).collection('subkategori').get();
+        userSubCategoryMap[uid] = {
+          for (var doc in subCatSnap.docs) doc.id: (doc.data()['namaSubKategori'] ?? '-').toString()
+        };
+      }
+
       var excel = Excel.createExcel();
       String sheetName = excel.sheets.keys.isNotEmpty ? excel.sheets.keys.first : 'Sheet1';
       Sheet sheet = excel[sheetName];
@@ -235,6 +353,7 @@ class _TransaksiScreenState extends State<TransaksiScreen> {
       // Header
       sheet.appendRow([
         TextCellValue('Tanggal'),
+        TextCellValue('Oleh'),
         TextCellValue('Kategori'),
         TextCellValue('Sub Kategori'),
         TextCellValue('Bank'),
@@ -245,18 +364,40 @@ class _TransaksiScreenState extends State<TransaksiScreen> {
 
       // Isi Data
       for (var doc in filtered) {
-        final data = doc.data();
+        final data = doc.data() as Map<String, dynamic>;
         final rawTanggal = data['tanggal'];
         final DateTime tanggal = rawTanggal is Timestamp ? rawTanggal.toDate() : (rawTanggal is DateTime ? rawTanggal : DateTime.now());
         
-        String bankName = bankMap[data['bankId']] ?? 'Unknown';
-        String catName = categoryMap[data['kategoriId']] ?? '-';
-        String subCatName = subCategoryMap[data['subKategoriId']] ?? '-';
-        int nilai = data['nilai'] ?? 0;
-        String type = data['type'] ?? '';
+        final txUserId = data['userId'] ?? user!.uid;
+        
+        // Resolve Names from the correct user's master data
+        String bankName = userBankMap[txUserId]?[data['bankId']] ?? 'Unknown';
+        String catName = userCategoryMap[txUserId]?[data['kategoriId']] ?? '-';
+        String subCatName = userSubCategoryMap[txUserId]?[data['subKategoriId']] ?? '-';
+        
+        // Resolve User Name
+        String inputBy = 'Saya';
+        if (txUserId != user!.uid) {
+           final foundMember = _familyMembers.firstWhere(
+            (element) => element['uid'] == txUserId,
+            orElse: () => {'name': 'Anggota'},
+          );
+          inputBy = foundMember['name'];
+        }
+        
+        final rawNilai = data['nilai'];
+        int nilai = 0;
+        if (rawNilai is num) {
+          nilai = rawNilai.toInt();
+        } else if (rawNilai is String) {
+          nilai = int.tryParse(rawNilai.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
+        }
+        
+        String type = (data['type'] ?? '').toString();
 
         sheet.appendRow([
           TextCellValue(DateFormat('dd/MM/yyyy').format(tanggal)),
+          TextCellValue(inputBy),
           TextCellValue(catName),
           TextCellValue(subCatName),
           TextCellValue(bankName),
@@ -361,6 +502,96 @@ class _TransaksiScreenState extends State<TransaksiScreen> {
     );
   }
 
+  Widget _buildFamilyFilter() {
+    if (!_isProMember || _currentUserFamilyId == null || _familyMembers.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      color: Colors.grey.shade100,
+      child: Row(
+        children: [
+          const Text('Filter Anggota: ', style: TextStyle(fontWeight: FontWeight.bold)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: DropdownButton<String?>(
+              isExpanded: true,
+              value: _selectedMemberUid,
+              hint: const Text('Semua Anggota'),
+              items: [
+                const DropdownMenuItem<String?>(
+                  value: null,
+                  child: Text('Semua Anggota'),
+                ),
+                ..._familyMembers.map((member) {
+                  return DropdownMenuItem<String?>(
+                    value: member['uid'],
+                    child: Text(member['name']),
+                  );
+                }).toList(),
+              ],
+              onChanged: (value) {
+                setState(() {
+                  _selectedMemberUid = value;
+                });
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSummaryCard(int total) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      margin: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+      decoration: BoxDecoration(
+        color: widget.type == 'pendapatan' ? Colors.green : Colors.red,
+        borderRadius: BorderRadius.circular(15),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withOpacity(0.3),
+            spreadRadius: 2,
+            blurRadius: 5,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Total ${widget.type == 'pendapatan' ? 'Pendapatan' : 'Pengeluaran'}',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _formatCurrency(total),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '${DateFormat('dd MMM').format(_startDate)} - ${DateFormat('dd MMM yyyy').format(_endDate)}',
+            style: const TextStyle(
+              color: Colors.white70,
+              fontSize: 12,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showFabMenu() {
     showModalBottomSheet(
       context: context,
@@ -413,105 +644,42 @@ class _TransaksiScreenState extends State<TransaksiScreen> {
       itemBuilder: (context, index) {
         final data = transaksi[index].data() as Map<String, dynamic>;
         final docId = transaksi[index].id;
-        final rawTanggal = data['tanggal'];
-        final DateTime tanggal = rawTanggal is Timestamp ? rawTanggal.toDate() : (rawTanggal is DateTime ? rawTanggal : DateTime.now());
-        final nilai = data['nilai'] ?? 0;
-        final catatan = data['catatan'] ?? 'Tanpa catatan';
-        final bankId = data['bankId'] ?? '';
-        final type = data['type'] ?? widget.type;
+        final userId = data['userId'];
+        final rawBankId = data['bankId'];
+        String bankId = '';
+        if (rawBankId is String) {
+          bankId = rawBankId.trim();
+        } else if (rawBankId is DocumentReference) {
+          bankId = rawBankId.id;
+        }
+        final transactionRef = transaksi[index].reference;
 
-        return FutureBuilder<DocumentSnapshot>(
-          future: _firestore
-              .collection('users')
-              .doc(user?.uid)
-              .collection('banks')
-              .doc(bankId)
-              .get(),
-          builder: (context, bankSnapshot) {
-            String bankName = 'Unknown';
-            if (bankSnapshot.hasData && bankSnapshot.data!.exists) {
-              final bankData = bankSnapshot.data!.data() as Map<String, dynamic>;
-              bankName = bankData['namaBanks'] ?? 'Unknown';
-            }
+        String inputBy = 'Saya';
+        if (userId != null && user != null && userId != user!.uid) {
+          final foundMember = _familyMembers.firstWhere(
+            (element) => element['uid'] == userId,
+            orElse: () => {'name': 'Anggota Keluarga'},
+          );
+          inputBy = foundMember['name'];
+        }
 
-            return GestureDetector(
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => TransaksiDetailScreen(
-                      transaksiId: docId,
-                      data: data,
-                      bankName: bankName,
-                      type: widget.type,
-                    ),
-                  ),
-                );
-              },
-              child: Card(
-                elevation: 2,
-                margin: const EdgeInsets.only(bottom: 12),
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: _getTypeColor(type).withOpacity(0.2),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          _getTypeIcon(type),
-                          color: _getTypeColor(type),
-                          size: 24,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              catatan,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 14,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Bank: $bankName',
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              DateFormat('dd MMM yyyy').format(tanggal),
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Text(
-                        _formatCurrency(nilai),
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                          color: _getTypeColor(type),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          },
+        DocumentReference? bankRef;
+        final txFamilyId = data['familyId'] as String?;
+
+        if (bankId.isNotEmpty) {
+          // Selalu ambil referensi bank dari user pembuat transaksi (Master Data tetap di user)
+          final ownerId = (userId ?? user!.uid).toString();
+          bankRef = _firestore.collection('users').doc(ownerId).collection('banks').doc(bankId);
+        }
+
+        return TransactionItem(
+          key: ValueKey(docId),
+          data: data,
+          docId: docId,
+          transactionRef: transactionRef,
+          type: widget.type,
+          inputBy: inputBy,
+          bankRef: bankRef,
         );
       },
     );
@@ -522,7 +690,7 @@ class _TransaksiScreenState extends State<TransaksiScreen> {
 
     // Filter by type
     final transaksi = allTransaksi.where((t) {
-      final transactionType = t['type'] ?? '';
+      final transactionType = (t['type'] ?? '').toString();
       final rawTanggal = t['tanggal'];
       final DateTime tanggal = rawTanggal is Timestamp ? rawTanggal.toDate() : (rawTanggal is DateTime ? rawTanggal : DateTime.now());
 
@@ -537,12 +705,31 @@ class _TransaksiScreenState extends State<TransaksiScreen> {
       }
     }).toList();
 
+    // Hitung Total Nilai Offline
+    int totalNilai = 0;
+    for (var data in transaksi) {
+      final rawNilai = data['nilai'];
+      int nilai = 0;
+      if (rawNilai is num) {
+        nilai = rawNilai.toInt();
+      } else if (rawNilai is String) {
+        nilai = int.tryParse(rawNilai.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
+      }
+      totalNilai += nilai;
+    }
+
     if (transaksi.isEmpty) {
-      return _buildEmptyView();
+      return Column(
+        children: [
+          _buildSummaryCard(totalNilai),
+          Expanded(child: _buildEmptyView()),
+        ],
+      );
     }
 
     return Column(
       children: [
+        _buildSummaryCard(totalNilai),
         Container(
           color: Colors.orange.withOpacity(0.1),
           padding: const EdgeInsets.all(12),
@@ -565,10 +752,18 @@ class _TransaksiScreenState extends State<TransaksiScreen> {
             itemCount: transaksi.length,
             itemBuilder: (context, index) {
               final data = transaksi[index];
-              final nilai = data['nilai'] ?? 0;
+              
+              final rawNilai = data['nilai'];
+              int nilai = 0;
+              if (rawNilai is num) {
+                nilai = rawNilai.toInt();
+              } else if (rawNilai is String) {
+                nilai = int.tryParse(rawNilai.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
+              }
+
               final catatan = data['catatan'] ?? 'Tanpa catatan';
               final bankId = data['bankId'] ?? '';
-              final type = data['type'] ?? widget.type;
+              final type = (data['type'] ?? widget.type).toString();
 
               return Card(
                 elevation: 2,
@@ -715,14 +910,15 @@ class _AddTransaksiScreenState extends State<AddTransaksiScreen> {
 
   Future<void> _checkProStatus() async {
     _isProMember = await UserUtils.isCurrentUserProMember();
-    _currentUserFamilyId = await UserUtils.getCurrentUserFamilyId();
+    final rawFamilyId = await UserUtils.getCurrentUserFamilyId();
+    _currentUserFamilyId = (rawFamilyId != null && rawFamilyId.trim().isNotEmpty) ? rawFamilyId.trim() : null;
     if (mounted) {
       setState(() {});
     }
   }
 
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final user = FirebaseAuth.instance.currentUser;
+  User? get user => FirebaseAuth.instance.currentUser;
 
   @override
   void dispose() {
@@ -862,7 +1058,7 @@ class _AddTransaksiScreenState extends State<AddTransaksiScreen> {
                                 .snapshots()
                             : _firestore
                                 .collection('users')
-                                .doc(user?.uid)
+                                .doc(user!.uid)
                                 .collection('banks')
                                 .orderBy('namaBanks')
                                 .snapshots(),
@@ -1001,7 +1197,7 @@ class _AddTransaksiScreenState extends State<AddTransaksiScreen> {
                                 .snapshots()
                             : _firestore
                                 .collection('users')
-                                .doc(user?.uid)
+                                .doc(user!.uid)
                                 .collection('subkategori')
                                 .orderBy('namaSubKategori')
                                 .snapshots(),
@@ -1210,11 +1406,9 @@ class _AddTransaksiScreenState extends State<AddTransaksiScreen> {
               ),
               const SizedBox(height: 8),
               StreamBuilder<QuerySnapshot>(
-                stream: _firestore
-                    .collection('users')
-                    .doc(user?.uid)
-                    .collection('kategori')
-                    .snapshots(),
+                stream: (_isProMember && _currentUserFamilyId != null)
+                    ? _firestore.collection('families').doc(_currentUserFamilyId!).collection('kategori').snapshots()
+                    : _firestore.collection('users').doc(user!.uid).collection('kategori').snapshots(),
                 builder: (context, snapshot) {
                   if (!snapshot.hasData) {
                     return const CircularProgressIndicator();
@@ -1464,7 +1658,7 @@ class _AddTransaksiScreenState extends State<AddTransaksiScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final user = FirebaseAuth.instance.currentUser;
+      final user = this.user;
       if (user == null) {
         throw Exception('User not logged in');
       }
@@ -1500,10 +1694,11 @@ class _AddTransaksiScreenState extends State<AddTransaksiScreen> {
         }
         
         // Cari kategori yang sesuai di database agar nyambung dengan Data Master
-        final categoryQuery = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(user.uid)
-            .collection('kategori')
+        final CollectionReference categoryCollection = (_isProMember && _currentUserFamilyId != null)
+            ? _firestore.collection('families').doc(_currentUserFamilyId!).collection('kategori')
+            : _firestore.collection('users').doc(user.uid).collection('kategori');
+
+        final categoryQuery = await categoryCollection
             .where('namaKategori', isEqualTo: categoryName)
             .limit(1)
             .get();
@@ -1512,11 +1707,7 @@ class _AddTransaksiScreenState extends State<AddTransaksiScreen> {
           _selectedKategori = categoryQuery.docs.first.id;
         } else {
           // Buat kategori baru di Data Master jika belum ada
-          final newCatRef = await FirebaseFirestore.instance
-              .collection('users')
-              .doc(user.uid)
-              .collection('kategori')
-              .add({
+          final newCatRef = await categoryCollection.add({
             'idKategori': 'KATEGORI${DateTime.now().millisecondsSinceEpoch}',
             'namaKategori': categoryName,
             'createdAt': FieldValue.serverTimestamp(),
@@ -1528,7 +1719,7 @@ class _AddTransaksiScreenState extends State<AddTransaksiScreen> {
       CollectionReference transaksiCollection;
       String? transaksiFamilyId;
 
-      if (_isProMember && _currentUserFamilyId != null) {
+      if (_isProMember && _currentUserFamilyId != null && _currentUserFamilyId!.isNotEmpty) {
         transaksiCollection = _firestore.collection('families').doc(_currentUserFamilyId!).collection('transaksi');
         transaksiFamilyId = _currentUserFamilyId;
       } else {
@@ -1588,11 +1779,25 @@ class _PindahDanaScreenState extends State<PindahDanaScreen> {
   String? _bankSebelumName;
   String? _bankSesudah;
   String? _bankSesudahName;
+  bool _isProMember = false;
+  String? _currentUserFamilyId;
   final _nilaiController = TextEditingController();
   bool _isLoading = false;
 
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final user = FirebaseAuth.instance.currentUser;
+  User? get user => FirebaseAuth.instance.currentUser;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkProStatus();
+  }
+
+  Future<void> _checkProStatus() async {
+    _isProMember = await UserUtils.isCurrentUserProMember();
+    final rawFamilyId = await UserUtils.getCurrentUserFamilyId();
+    _currentUserFamilyId = (rawFamilyId != null && rawFamilyId.trim().isNotEmpty) ? rawFamilyId.trim() : null;
+  }
 
   @override
   void dispose() {
@@ -1661,10 +1866,17 @@ class _PindahDanaScreenState extends State<PindahDanaScreen> {
                     const SizedBox(height: 15),
                     Expanded(
                       child: StreamBuilder<QuerySnapshot>(
-                        stream: _firestore
-                            .collection('users')
-                            .doc(user?.uid)
-                            .collection('banks')
+                        stream: (_isProMember && _currentUserFamilyId != null)
+                            ? _firestore
+                                .collection('families')
+                                .doc(_currentUserFamilyId!)
+                                .collection('banks')
+                                .orderBy('namaBanks')
+                                .snapshots()
+                            : _firestore
+                                .collection('users')
+                                .doc(user!.uid)
+                                .collection('banks')
                             .orderBy('namaBanks')
                             .snapshots(),
                         builder: (context, snapshot) {
@@ -1919,7 +2131,7 @@ class _PindahDanaScreenState extends State<PindahDanaScreen> {
     try {
       final nilai = int.parse(_nilaiController.text.replaceAll('.', ''));
       final now = DateTime.now();
-      final user = FirebaseAuth.instance.currentUser;
+      final user = this.user;
       if (user == null) {
         throw Exception('User not logged in');
       }
@@ -1927,28 +2139,29 @@ class _PindahDanaScreenState extends State<PindahDanaScreen> {
       // --- New Logic: Create 2 Transactions ---
 
       // 1. Get bank names for notes
-      final bankSebelumDoc = await _firestore.collection('users').doc(user.uid).collection('banks').doc(_bankSebelum).get();
-      final bankSesudahDoc = await _firestore.collection('users').doc(user.uid).collection('banks').doc(_bankSesudah).get();
-      final bankSebelumName = bankSebelumDoc.data()?['namaBanks'] ?? 'Unknown';
-      final bankSesudahName = bankSesudahDoc.data()?['namaBanks'] ?? 'Unknown';
+      final CollectionReference bankCollection = (_isProMember && _currentUserFamilyId != null)
+          ? _firestore.collection('families').doc(_currentUserFamilyId!).collection('banks')
+          : _firestore.collection('users').doc(user.uid).collection('banks');
+
+      final bankSebelumDoc = await bankCollection.doc(_bankSebelum).get();
+      final bankSesudahDoc = await bankCollection.doc(_bankSesudah).get();
+      final bankSebelumName = (bankSebelumDoc.data() as Map<String, dynamic>?)?['namaBanks'] ?? 'Unknown';
+      final bankSesudahName = (bankSesudahDoc.data() as Map<String, dynamic>?)?['namaBanks'] ?? 'Unknown';
 
       // 2. Get or create Category & Sub-category IDs
       Future<String> getKategoriId(String namaKategori) async {
-        final query = await _firestore
-            .collection('users')
-            .doc(user.uid)
-            .collection('kategori')
+        final CollectionReference col = (_isProMember && _currentUserFamilyId != null)
+            ? _firestore.collection('families').doc(_currentUserFamilyId!).collection('kategori')
+            : _firestore.collection('users').doc(user.uid).collection('kategori');
+
+        final query = await col
             .where('namaKategori', isEqualTo: namaKategori)
             .limit(1)
             .get();
         if (query.docs.isNotEmpty) {
           return query.docs.first.id;
         } else {
-          final newDoc = await _firestore
-              .collection('users')
-              .doc(user.uid)
-              .collection('kategori')
-              .add({
+          final newDoc = await col.add({
             'namaKategori': namaKategori,
             'createdAt': FieldValue.serverTimestamp(),
           });
@@ -1957,21 +2170,18 @@ class _PindahDanaScreenState extends State<PindahDanaScreen> {
       }
       
       Future<String> getSubKategoriId(String namaSubKategori) async {
-         final query = await _firestore
-            .collection('users')
-            .doc(user.uid)
-            .collection('subkategori')
+         final CollectionReference col = (_isProMember && _currentUserFamilyId != null)
+            ? _firestore.collection('families').doc(_currentUserFamilyId!).collection('subkategori')
+            : _firestore.collection('users').doc(user.uid).collection('subkategori');
+
+         final query = await col
             .where('namaSubKategori', isEqualTo: namaSubKategori)
             .limit(1)
             .get();
         if (query.docs.isNotEmpty) {
           return query.docs.first.id;
         } else {
-          final newDoc = await _firestore
-              .collection('users')
-              .doc(user.uid)
-              .collection('subkategori')
-              .add({
+          final newDoc = await col.add({
             'namaSubKategori': namaSubKategori,
             'createdAt': FieldValue.serverTimestamp(),
           });
@@ -1983,12 +2193,19 @@ class _PindahDanaScreenState extends State<PindahDanaScreen> {
       final kategoriPendapatanId = await getKategoriId('Pendapatan');
       final subKategoriId = await getSubKategoriId('Pindah Dana');
 
+      // Tentukan koleksi tujuan (Family atau User)
+      CollectionReference transaksiCollection;
+      String? transaksiFamilyId;
+
+      if (_isProMember && _currentUserFamilyId != null && _currentUserFamilyId!.isNotEmpty) {
+        transaksiCollection = _firestore.collection('families').doc(_currentUserFamilyId!).collection('transaksi');
+        transaksiFamilyId = _currentUserFamilyId;
+      } else {
+        transaksiCollection = _firestore.collection('users').doc(user.uid).collection('transaksi');
+      }
+
       // 3. Create expense transaction from source bank
-      await _firestore
-          .collection('users')
-          .doc(user.uid)
-          .collection('transaksi')
-          .add({
+      await transaksiCollection.add({
         'type': 'pengeluaran',
         'nilai': nilai,
         'catatan': 'Pindah dana ke $bankSesudahName',
@@ -1996,16 +2213,14 @@ class _PindahDanaScreenState extends State<PindahDanaScreen> {
         'tanggal': now,
         'kategoriId': kategoriPengeluaranId,
         'subKategoriId': subKategoriId,
+        'userId': user.uid, // Penting: simpan userId agar list bisa resolve bank
+        if (transaksiFamilyId != null) 'familyId': transaksiFamilyId,
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
       });
 
       // 4. Create income transaction to destination bank
-      await _firestore
-          .collection('users')
-          .doc(user.uid)
-          .collection('transaksi')
-          .add({
+      await transaksiCollection.add({
         'type': 'pendapatan',
         'nilai': nilai,
         'catatan': 'Pindah dana dari $bankSebelumName',
@@ -2013,6 +2228,8 @@ class _PindahDanaScreenState extends State<PindahDanaScreen> {
         'tanggal': now,
         'kategoriId': kategoriPendapatanId,
         'subKategoriId': subKategoriId,
+        'userId': user.uid,
+        if (transaksiFamilyId != null) 'familyId': transaksiFamilyId,
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
       });
@@ -2047,6 +2264,7 @@ class _PindahDanaScreenState extends State<PindahDanaScreen> {
 
 class TransaksiDetailScreen extends StatefulWidget {
   final String transaksiId;
+  final DocumentReference transactionRef;
   final Map<String, dynamic> data;
   final String bankName;
   final String type;
@@ -2054,6 +2272,7 @@ class TransaksiDetailScreen extends StatefulWidget {
   const TransaksiDetailScreen({
     Key? key,
     required this.transaksiId,
+    required this.transactionRef,
     required this.data,
     required this.bankName,
     required this.type,
@@ -2078,18 +2297,25 @@ class _TransaksiDetailScreenState extends State<TransaksiDetailScreen> {
   String? _currentUserFamilyId;
 
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final user = FirebaseAuth.instance.currentUser;
+  User? get user => FirebaseAuth.instance.currentUser;
 
   @override
   void initState() {
     super.initState();
     _catatanController = TextEditingController(text: widget.data['catatan'] ?? '');
     
-    final initialNilai = widget.data['nilai'] ?? 0;
+    final rawNilai = widget.data['nilai'];
+    int initialNilai = 0;
+    if (rawNilai is num) {
+      initialNilai = rawNilai.toInt();
+    } else if (rawNilai is String) {
+      initialNilai = int.tryParse(rawNilai.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
+    }
+
     final formattedNilai = NumberFormat('#,##0', 'id_ID').format(initialNilai);
     _nilaiController = TextEditingController(text: formattedNilai);
     
-    _currentType = widget.data['type'] ?? widget.type;
+    _currentType = (widget.data['type'] ?? widget.type).toString();
     _selectedBank = widget.data['bankId'];
     _selectedBankName = widget.bankName;
     _selectedSubKategori = widget.data['subKategoriId'];
@@ -2101,7 +2327,8 @@ class _TransaksiDetailScreenState extends State<TransaksiDetailScreen> {
 
   Future<void> _checkProStatus() async {
     _isProMember = await UserUtils.isCurrentUserProMember();
-    _currentUserFamilyId = await UserUtils.getCurrentUserFamilyId();
+    final rawFamilyId = await UserUtils.getCurrentUserFamilyId();
+    _currentUserFamilyId = (rawFamilyId != null && rawFamilyId.trim().isNotEmpty) ? rawFamilyId.trim() : null;
     if (mounted) {
       setState(() {});
     }
@@ -2109,15 +2336,16 @@ class _TransaksiDetailScreenState extends State<TransaksiDetailScreen> {
 
   Future<void> _fetchSubKategoriName() async {
     try {
-      final doc = await _firestore
-          .collection('users')
-          .doc(user?.uid)
-          .collection('subkategori')
+      final CollectionReference col = (_isProMember && _currentUserFamilyId != null)
+          ? _firestore.collection('families').doc(_currentUserFamilyId!).collection('subkategori')
+          : _firestore.collection('users').doc(user!.uid).collection('subkategori');
+
+      final doc = await col
           .doc(_selectedSubKategori)
           .get();
       if (doc.exists && mounted) {
         setState(() {
-          _selectedSubKategoriName = doc.data()?['namaSubKategori'];
+          _selectedSubKategoriName = (doc.data() as Map<String, dynamic>?)?['namaSubKategori'];
         });
       }
     } catch (e) {
@@ -2193,10 +2421,17 @@ class _TransaksiDetailScreenState extends State<TransaksiDetailScreen> {
                     const SizedBox(height: 15),
                     Expanded(
                       child: StreamBuilder<QuerySnapshot>(
-                        stream: _firestore
-                            .collection('users')
-                            .doc(user?.uid)
-                            .collection('banks')
+                        stream: (_isProMember && _currentUserFamilyId != null)
+                            ? _firestore
+                                .collection('families')
+                                .doc(_currentUserFamilyId!)
+                                .collection('banks')
+                                .orderBy('namaBanks')
+                                .snapshots()
+                            : _firestore
+                                .collection('users')
+                                .doc(user!.uid)
+                                .collection('banks')
                             .orderBy('namaBanks')
                             .snapshots(),
                         builder: (context, snapshot) {
@@ -2334,7 +2569,7 @@ class _TransaksiDetailScreenState extends State<TransaksiDetailScreen> {
                                 .snapshots()
                             : _firestore
                                 .collection('users')
-                                .doc(user?.uid)
+                                .doc(user!.uid)
                                 .collection('subkategori')
                                 .orderBy('namaSubKategori')
                                 .snapshots(),
@@ -2416,12 +2651,7 @@ class _TransaksiDetailScreenState extends State<TransaksiDetailScreen> {
     try {
       final nilai = int.parse(_nilaiController.text.replaceAll('.', ''));
 
-      await _firestore
-          .collection('users')
-          .doc(user?.uid)
-          .collection('transaksi')
-          .doc(widget.transaksiId)
-          .update({
+      await widget.transactionRef.update({
         'catatan': _catatanController.text,
         'nilai': nilai,
         'type': _currentType,
@@ -2487,12 +2717,7 @@ class _TransaksiDetailScreenState extends State<TransaksiDetailScreen> {
                   }
                 }
 
-                await _firestore
-                    .collection('users')
-                    .doc(user?.uid)
-                    .collection('transaksi')
-                    .doc(widget.transaksiId)
-                    .delete();
+                await widget.transactionRef.delete();
 
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -2833,10 +3058,16 @@ class _TransaksiDetailScreenState extends State<TransaksiDetailScreen> {
                           setState(() => _isEditing = false);
                           _catatanController.text =
                               widget.data['catatan'] ?? '';
-                          final initialNilai = widget.data['nilai'] ?? 0;
+                          final rawNilai = widget.data['nilai'];
+                          int initialNilai = 0;
+                          if (rawNilai is num) {
+                            initialNilai = rawNilai.toInt();
+                          } else if (rawNilai is String) {
+                            initialNilai = int.tryParse(rawNilai.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
+                          }
                           final formattedNilai = NumberFormat('#,##0', 'id_ID').format(initialNilai);
                           _nilaiController.text = formattedNilai;
-                          _currentType = widget.data['type'] ?? widget.type;
+                          _currentType = (widget.data['type'] ?? widget.type).toString();
                           _selectedSubKategori = widget.data['subKategoriId'];
                           _selectedBank = widget.data['bankId'];
                           _selectedBankName = widget.bankName;
@@ -2856,5 +3087,192 @@ class _TransaksiDetailScreenState extends State<TransaksiDetailScreen> {
         ),
       ),
     );
+  }
+}
+
+class TransactionItem extends StatefulWidget {
+  final Map<String, dynamic> data;
+  final String docId;
+  final DocumentReference transactionRef;
+  final String type;
+  final String inputBy;
+  final DocumentReference? bankRef;
+
+  const TransactionItem({
+    Key? key,
+    required this.data,
+    required this.docId,
+    required this.transactionRef,
+    required this.type,
+    required this.inputBy,
+    required this.bankRef,
+  }) : super(key: key);
+
+  @override
+  State<TransactionItem> createState() => _TransactionItemState();
+}
+
+class _TransactionItemState extends State<TransactionItem> {
+  Future<DocumentSnapshot>? _bankFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.bankRef != null) {
+      _bankFuture = widget.bankRef!.get();
+    }
+  }
+
+  @override
+  void didUpdateWidget(TransactionItem oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.bankRef != widget.bankRef) {
+      if (widget.bankRef != null) {
+        _bankFuture = widget.bankRef!.get();
+      } else {
+        _bankFuture = null;
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final rawTanggal = widget.data['tanggal'];
+    final DateTime tanggal = rawTanggal is Timestamp ? rawTanggal.toDate() : (rawTanggal is DateTime ? rawTanggal : DateTime.now());
+    
+    final rawNilai = widget.data['nilai'];
+    int nilai = 0;
+    if (rawNilai is num) {
+      nilai = rawNilai.toInt();
+    } else if (rawNilai is String) {
+      nilai = int.tryParse(rawNilai.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
+    }
+
+    final catatan = (widget.data['catatan'] ?? 'Tanpa catatan').toString();
+    final type = (widget.data['type'] ?? widget.type).toString();
+
+    if (_bankFuture == null) {
+      return _buildCard(context, 'Unknown', catatan, tanggal, nilai, type);
+    }
+
+    return FutureBuilder<DocumentSnapshot>(
+      future: _bankFuture,
+      builder: (context, bankSnapshot) {
+        String bankName = 'Unknown';
+        if (bankSnapshot.hasData && bankSnapshot.data!.exists) {
+          final bankData = bankSnapshot.data!.data() as Map<String, dynamic>;
+          bankName = bankData['namaBanks'] ?? 'Unknown';
+        }
+
+        return _buildCard(context, bankName, catatan, tanggal, nilai, type);
+      },
+    );
+  }
+
+  Widget _buildCard(BuildContext context, String bankName, String catatan, DateTime tanggal, int nilai, String type) {
+    return GestureDetector(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => TransaksiDetailScreen(
+              transaksiId: widget.docId,
+              transactionRef: widget.transactionRef,
+              data: widget.data,
+              bankName: bankName,
+              type: widget.type,
+            ),
+          ),
+        );
+      },
+      child: Card(
+        elevation: 2,
+        margin: const EdgeInsets.only(bottom: 12),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: _getTypeColor(type).withOpacity(0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  _getTypeIcon(type),
+                  color: _getTypeColor(type),
+                  size: 24,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      catatan,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Bank: $bankName',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      DateFormat('dd MMM yyyy').format(tanggal),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Oleh: ${widget.inputBy}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.grey.shade600,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Text(
+                _formatCurrency(nilai),
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                  color: _getTypeColor(type),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  IconData _getTypeIcon(String type) {
+    if (type == 'hutang') return Icons.money_off;
+    return type == 'pendapatan' ? Icons.trending_up : Icons.trending_down;
+  }
+
+  Color _getTypeColor(String type) {
+    if (type == 'hutang') return Colors.amber;
+    return type == 'pendapatan' ? Colors.green : Colors.red;
+  }
+
+  String _formatCurrency(int value) {
+    return 'Rp ${value.toString().replaceAllMapped(
+          RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+          (Match m) => '${m[1]}.',
+        )}';
   }
 }

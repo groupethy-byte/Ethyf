@@ -26,17 +26,6 @@ class FamilyManagementPage extends GetView<FamilyController> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // --- DEBUG INFO (Hapus nanti jika sudah fix) ---
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(10),
-                margin: const EdgeInsets.only(bottom: 15),
-                color: Colors.yellow.shade100,
-                child: SelectableText(
-                  'DEBUG UID ANDA: ${controller.user?.uid}\n(Pastikan Admin mengundang UID ini)',
-                  style: const TextStyle(fontSize: 12, fontFamily: 'monospace', color: Colors.black87),
-                ),
-              ),
               // Bagian Undangan Masuk
               if (invitations.isNotEmpty) ...[
                 const Text(
@@ -200,7 +189,64 @@ class FamilyManagementPage extends GetView<FamilyController> {
         // Hanya tampilkan form invite jika user adalah owner (Admin)
         if (family.isPro && controller.user?.uid == family.ownerUid)
           _buildInviteMemberSection(context),
+        
+        const SizedBox(height: 40),
+        
+        // Hanya tampilkan tombol hapus jika user adalah owner (Admin)
+        if (controller.user?.uid == family.ownerUid) ...[
+          const Divider(thickness: 1, color: Colors.red),
+          const SizedBox(height: 10),
+          _buildDangerZone(context, controller),
+        ]
       ],
+    );
+  }
+
+  Widget _buildDangerZone(BuildContext context, FamilyController controller) {
+    return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+            const Text(
+                'Zona Berbahaya',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.red),
+            ),
+            const SizedBox(height: 10),
+            const Text(
+                'Tindakan di bawah ini tidak dapat diurungkan. Pastikan Anda benar-benar yakin.',
+                style: TextStyle(fontSize: 14, color: Colors.black54),
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                    icon: const Icon(Icons.delete_forever),
+                    label: const Text('Hapus Keluarga Ini'),
+                    onPressed: () => _showDeleteFamilyConfirmation(context, controller),
+                    style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.red,
+                        side: const BorderSide(color: Colors.red),
+                    ),
+                ),
+            ),
+        ],
+    );
+  }
+
+  void _showDeleteFamilyConfirmation(BuildContext context, FamilyController controller) {
+    Get.defaultDialog(
+        title: 'Anda Yakin?',
+        titleStyle: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+        middleText:
+            'Menghapus keluarga akan menghapus SEMUA data terkait (termasuk data semua anggota) dan mengembalikan akun semua anggota ke versi gratis. Tindakan ini tidak dapat diurungkan.',
+        textConfirm: 'Ya, Hapus Keluarga',
+        textCancel: 'Batal',
+        buttonColor: Colors.red,
+        confirmTextColor: Colors.white,
+        cancelTextColor: Colors.black87,
+        onConfirm: () {
+            Get.back(); // Close dialog first
+            controller.deleteFamily();
+        },
     );
   }
 
@@ -313,7 +359,7 @@ class FamilyManagementPage extends GetView<FamilyController> {
         ),
         const SizedBox(height: 10),
         const Text(
-          '* Untuk saat ini, masukkan UID anggota Firebase yang ingin diundang.',
+          '* Masukkan UID / Email anggota yang ingin diundang.',
           style: TextStyle(fontSize: 12, color: Colors.grey),
         ),
       ],

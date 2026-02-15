@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 import 'package:fl_chart/fl_chart.dart';
+import '../../../utils/user_utils.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({Key? key}) : super(key: key);
@@ -25,10 +26,29 @@ class _DashboardScreenState extends State<DashboardScreen> {
   int _touchedIndex = -1;
   late Future<Map<String, dynamic>> _statsFuture;
 
+  bool _isProMember = false;
+  String? _currentUserFamilyId;
+  List<Map<String, String>> _familyMembers = [];
+  String? _selectedMemberUid;
+
   @override
   void initState() {
     super.initState();
-    _onPeriodSelected(_selectedPeriod); // Set initial date range
+    _onPeriodSelected(_selectedPeriod);
+    _initialize();
+  }
+
+  Future<void> _initialize() async {
+    _isProMember = await UserUtils.isCurrentUserProMember();
+    _currentUserFamilyId = await UserUtils.getCurrentUserFamilyId();
+    if (_isProMember && _currentUserFamilyId != null) {
+      _familyMembers = await UserUtils.getFamilyMembers(_currentUserFamilyId!);
+    }
+    if (mounted) {
+      setState(() {
+        _statsFuture = _calculateStatistics();
+      });
+    }
   }
 
   @override
@@ -38,6 +58,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           children: [
             // Filter Section
             _buildFilterSection(),
+            _buildFamilyFilter(),
             // Statistics Section
             _buildStatisticsSection(),
             const SizedBox(height: 20),
@@ -211,6 +232,48 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  Widget _buildFamilyFilter() {
+    if (!_isProMember || _currentUserFamilyId == null || _familyMembers.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
+      color: Colors.grey.shade100,
+      child: Row(
+        children: [
+          const Text('Filter Anggota: ', style: TextStyle(fontWeight: FontWeight.bold)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: DropdownButton<String?>(
+              isExpanded: true,
+              value: _selectedMemberUid,
+              hint: const Text('Semua Anggota'),
+              items: [
+                const DropdownMenuItem<String?>(
+                  value: null,
+                  child: Text('Semua Anggota'),
+                ),
+                ..._familyMembers.map((member) {
+                  return DropdownMenuItem<String?>(
+                    value: member['uid'],
+                    child: Text(member['name'] ?? 'Anggota'),
+                  );
+                }).toList(),
+              ],
+              onChanged: (value) {
+                setState(() {
+                  _selectedMemberUid = value;
+                  _statsFuture = _calculateStatistics();
+                });
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildFilterChip(String value, String label) {
     final isSelected = _filterType == value;
     return FilterChip(
@@ -254,7 +317,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
         final totalPendapatan = stats['totalPendapatan'] as int;
         final totalPengeluaran = stats['totalPengeluaran'] as int;
         final totalHutang = stats['totalHutang'] as int;
+        final totalSaldoAwal = stats['totalSaldoAwal'] as int? ?? 0;
         final saldoBersih = totalPendapatan - totalPengeluaran - totalHutang;
+        final totalKekayaan = totalSaldoAwal + saldoBersih;
 
         return Padding(
           padding: const EdgeInsets.all(15),
@@ -310,6 +375,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
               const SizedBox(height: 20),
               // Detailed Statistics
               _buildDetailedStats(stats),
+              const SizedBox(height: 20),
+              // Finance Section (Data Keuangan)
+              _buildFinanceSection(totalSaldoAwal, totalKekayaan),
             ],
           ),
         );
@@ -408,7 +476,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         sections.add(PieChartSectionData(
           color: Colors.green,
           value: income,
-          title: '${((income / total) * 100).toStringAsFixed(0)}%',
+          title: _formatChartValue(income.toInt()),
           radius: isTouched ? 60 : 50,
           titleStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white),
         ));
@@ -418,7 +486,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         sections.add(PieChartSectionData(
           color: Colors.red,
           value: expense,
-          title: '${((expense / total) * 100).toStringAsFixed(0)}%',
+          title: _formatChartValue(expense.toInt()),
           radius: isTouched ? 60 : 50,
           titleStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white),
         ));
@@ -435,12 +503,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
       
       data.forEach((key, value) {
         final isTouched = _touchedIndex == i;
-        final percentage = total > 0 ? (value / total * 100) : 0;
         
         sections.add(PieChartSectionData(
           color: Colors.primaries[i % Colors.primaries.length],
           value: value.toDouble(),
-          title: '${percentage.toStringAsFixed(0)}%',
+          title: _formatChartValue(value),
           radius: isTouched ? 60 : 50,
           titleStyle: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white),
         ));
@@ -597,6 +664,52 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  Widget _buildFinanceSection(int totalSaldoAwal, int totalKekayaan) {
+    return Container(
+      padding: const EdgeInsets.all(15),
+      decoration: BoxDecoration(
+        color: Colors.blue.shade50,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.blue.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Data Keuangan',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+              color: Colors.blue,
+            ),
+          ),
+          const SizedBox(height: 12),
+          _buildStatRow('Total Saldo Awal', _formatCurrency(totalSaldoAwal)),
+          const SizedBox(height: 8),
+          const Divider(),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'Total Kekayaan',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+              ),
+              Text(
+                _formatCurrency(totalKekayaan),
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                  color: Colors.blue,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildChartDataTable(Map<String, dynamic> stats) {
     if (_chartType == 'income_expense') {
       return const SizedBox.shrink(); // Don't show table for this type
@@ -642,12 +755,77 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  String _formatChartValue(int value) {
+    if (value >= 1000000000) {
+      double result = value / 1000000000;
+      return '${result.toStringAsFixed(result.truncateToDouble() == result ? 0 : 1)}M';
+    } else if (value >= 1000000) {
+      double result = value / 1000000;
+      return '${result.toStringAsFixed(result.truncateToDouble() == result ? 0 : 1)}JT';
+    } else if (value >= 1000) {
+      double result = value / 1000;
+      return '${result.toStringAsFixed(result.truncateToDouble() == result ? 0 : 1)}K';
+    }
+    return value.toString();
+  }
+
   Future<Map<String, dynamic>> _calculateStatistics() async {
+    if (user == null) {
+      print("Error: User is not authenticated. Cannot fetch statistics.");
+      // Return an empty map, FutureBuilder will show 'No data'.
+      return {
+        'totalPendapatan': 0,
+        'totalPengeluaran': 0,
+        'totalHutang': 0,
+        'transactionCount': 0,
+        'avgTransaction': 0,
+        'maxTransaction': 0,
+        'subCategoryStats': <String, int>{},
+        'bankStats': <String, int>{},
+        'totalSaldoAwal': 0,
+      };
+    }
+
     try {
-      final snapshot = await _firestore
-          .collection('users')
-          .doc(user?.uid)
-          .collection('transaksi')
+      Query collectionRef;
+      if (_isProMember && _currentUserFamilyId != null) {
+        collectionRef = _firestore.collection('families').doc(_currentUserFamilyId!).collection('transaksi');
+      } else {
+        collectionRef = _firestore.collection('users').doc(user!.uid).collection('transaksi');
+      }
+
+      // Fetch Total Saldo Awal dari semua bank
+      int totalSaldoAwal = 0;
+      try {
+        // 1. Ambil dari Bank Pribadi (Hanya jika filter Semua atau Saya)
+        if (_selectedMemberUid == null || _selectedMemberUid == user!.uid) {
+          final personalBanks = await _firestore.collection('users').doc(user!.uid).collection('banks').get();
+          for (var doc in personalBanks.docs) {
+            final data = doc.data() as Map<String, dynamic>;
+            totalSaldoAwal += (data['saldoAwal'] as num?)?.toInt() ?? 0;
+          }
+        }
+
+        // 2. Ambil dari Bank Keluarga (Jika Pro)
+        if (_isProMember && _currentUserFamilyId != null) {
+          final familyBanks = await _firestore.collection('families').doc(_currentUserFamilyId!).collection('banks').get();
+          for (var doc in familyBanks.docs) {
+            final data = doc.data() as Map<String, dynamic>;
+            
+            // Filter Bank Keluarga berdasarkan userId jika ada filter
+            if (_selectedMemberUid != null && data['userId'] != null && data['userId'] != _selectedMemberUid) {
+              continue;
+            }
+            totalSaldoAwal += (data['saldoAwal'] as num?)?.toInt() ?? 0;
+          }
+        }
+      } catch (e) {
+        print('Error fetching banks for saldo awal: $e');
+      }
+
+      final snapshot = await collectionRef
+          .where('tanggal', isGreaterThanOrEqualTo: _startDate)
+          .where('tanggal', isLessThanOrEqualTo: _endDate)
           .get();
 
       int totalPendapatan = 0;
@@ -664,25 +842,35 @@ class _DashboardScreenState extends State<DashboardScreen> {
       Map<String, String> subKatMap = {};
       
       try {
-        final banksSnapshot = await _firestore.collection('users').doc(user?.uid).collection('banks').get();
+        final banksSnapshot = await _firestore.collection('users').doc(user!.uid).collection('banks').get();
         for(var doc in banksSnapshot.docs) bankMap[doc.id] = (doc.data()['namaBanks'] ?? 'Unknown').toString();
         
-        final subKatsSnapshot = await _firestore.collection('users').doc(user?.uid).collection('subkategori').get();
+        final subKatsSnapshot = await _firestore.collection('users').doc(user!.uid).collection('subkategori').get();
         for(var doc in subKatsSnapshot.docs) subKatMap[doc.id] = (doc.data()['namaSubKategori'] ?? 'Unknown').toString();
+
+        if (_isProMember && _currentUserFamilyId != null) {
+          final famBanks = await _firestore.collection('families').doc(_currentUserFamilyId!).collection('banks').get();
+          for(var doc in famBanks.docs) bankMap[doc.id] = (doc.data()['namaBanks'] ?? 'Unknown').toString();
+          final famSubKats = await _firestore.collection('families').doc(_currentUserFamilyId!).collection('subkategori').get();
+          for(var doc in famSubKats.docs) subKatMap[doc.id] = (doc.data()['namaSubKategori'] ?? 'Unknown').toString();
+        }
       } catch (_) {}
 
       final List<int> amounts = [];
 
       for (var doc in snapshot.docs) {
         final data = doc.data() as Map<String, dynamic>;
+        
+        // Filter User (Client Side)
+        if (_isProMember && _selectedMemberUid != null) {
+          if (data['userId'] != _selectedMemberUid) {
+            continue;
+          }
+        }
+
         final tanggal = (data['tanggal'] as dynamic)?.toDate() ?? DateTime.now();
         final type = data['type'] ?? '';
         final nilai = (data['nilai'] as num?)?.toInt() ?? 0;
-
-        // Filter by date range
-        if (tanggal.isBefore(_startDate) || tanggal.isAfter(_endDate)) {
-          continue;
-        }
 
         // Filter by type
         if (_filterType != 'all' && type != _filterType) {
@@ -725,19 +913,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
         'maxTransaction': maxTransaction,
         'subCategoryStats': subCategoryStats,
         'bankStats': bankStats,
+        'totalSaldoAwal': totalSaldoAwal,
       };
     } catch (e) {
       print('Error calculating statistics: $e');
-      return {
-        'totalPendapatan': 0,
-        'totalPengeluaran': 0,
-        'totalHutang': 0,
-        'transactionCount': 0,
-        'avgTransaction': 0,
-        'maxTransaction': 0,
-        'subCategoryStats': <String, int>{},
-        'bankStats': <String, int>{},
-      };
+      // Re-throw the error to be caught by the FutureBuilder
+      throw Exception(
+          'Gagal memuat statistik. Kemungkinan besar ini adalah masalah indeks Firestore. Silakan periksa konsol debug Anda untuk link pembuatan indeks.');
     }
   }
 
@@ -748,4 +930,3 @@ class _DashboardScreenState extends State<DashboardScreen> {
         )}';
   }
 }
-

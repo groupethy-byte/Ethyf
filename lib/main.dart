@@ -2098,140 +2098,113 @@ class _KategoriListScreenState extends State<KategoriListScreen> {
 
   @override
   Widget build(BuildContext context) {
-    Query collectionRef;
+    // Logic view: Jika Pro, tampilkan gabungan. Jika tidak, hanya user.
     if (_isProMember && _currentUserFamilyId != null) {
-      collectionRef = _firestore.collection('families').doc(_currentUserFamilyId!).collection('kategori');
+      final familyRef = _firestore.collection('families').doc(_currentUserFamilyId!).collection('kategori');
+      final userRef = _firestore.collection('users').doc(user?.uid).collection('kategori');
+
+      return Scaffold(
+        appBar: AppBar(title: const Text('Daftar Kategori'), centerTitle: true),
+        body: SingleChildScrollView(
+          child: Column(
+            children: [
+              _buildKategoriList(familyRef, 'Kategori Keluarga'),
+              _buildKategoriList(userRef, 'Kategori Pribadi'),
+              _buildAddButton(),
+            ],
+          ),
+        ),
+      );
     } else {
-      collectionRef = _firestore.collection('users').doc(user?.uid).collection('kategori');
+      final userRef = _firestore.collection('users').doc(user?.uid).collection('kategori');
+      return Scaffold(
+        appBar: AppBar(title: const Text('Daftar Kategori'), centerTitle: true),
+        body: Column(
+          children: [
+            Expanded(child: _buildKategoriList(userRef, null, isScrollable: true)),
+            _buildAddButton(),
+          ],
+        ),
+      );
     }
+  }
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Daftar Kategori'),
-        centerTitle: true,
-      ),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: collectionRef.snapshots(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
-          if (snapshot.hasError) {
-            if (snapshot.error.toString().contains('permission-denied')) {
-              return const Center(child: Padding(
-                padding: EdgeInsets.all(16.0),
-                child: Text('Akses Ditolak: Mohon update Firestore Security Rules untuk fitur Keluarga.', textAlign: TextAlign.center, style: TextStyle(color: Colors.red)),
-              ));
-            }
-            return Center(child: Text('Error: ${snapshot.error}'));
-          }
-
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.category,
-                    size: 80,
-                    color: Colors.grey.withOpacity(0.3),
-                  ),
-                  const SizedBox(height: 20),
-                  const Text(
-                    'Belum ada data kategori',
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: Colors.grey,
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  ElevatedButton.icon(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const AddKategoriScreen(),
-                        ),
-                      );
-                    },
-                    icon: const Icon(Icons.add),
-                    label: const Text('Tambah Kategori'),
-                  ),
-                ],
-              ),
+  Widget _buildAddButton() {
+    return Padding(
+      padding: const EdgeInsets.all(15),
+      child: SizedBox(
+        width: double.infinity,
+        child: ElevatedButton.icon(
+          onPressed: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const AddKategoriScreen()),
             );
-          }
-
-          final kategoriList = snapshot.data!.docs;
-
-          return SafeArea(
-            child: Column(
-              children: [
-                Expanded(
-                  child: ListView.builder(
-                    itemCount: kategoriList.length,
-                    itemBuilder: (context, index) {
-                      final kategori =
-                          kategoriList[index].data() as Map<String, dynamic>;
-                      return Card(
-                        margin: const EdgeInsets.symmetric(
-                          horizontal: 15,
-                          vertical: 8,
-                        ),
-                        elevation: 2,
-                        child: ListTile(
-                          leading: const Icon(
-                            Icons.category,
-                            color: Colors.orange,
-                          ),
-                          title: Text(
-                            kategori['namaKategori'] ?? 'Unknown',
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          subtitle:
-                              Text('ID: ${kategori['idKategori'] ?? 'N/A'}'),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.delete, color: Colors.red),
-                            onPressed: () {
-                              _deleteKategori(kategoriList[index].id);
-                            },
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(15),
-                  child: SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => const AddKategoriScreen(),
-                          ),
-                        );
-                      },
-                      icon: const Icon(Icons.add),
-                      label: const Text('Tambah Kategori'),
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
+          },
+          icon: const Icon(Icons.add),
+          label: const Text('Tambah Kategori'),
+          style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12)),
+        ),
       ),
     );
   }
 
-  void _deleteKategori(String docId) {
+  Widget _buildKategoriList(Query collectionRef, String? title, {bool isScrollable = false}) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: collectionRef.snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Padding(padding: EdgeInsets.all(20), child: Center(child: CircularProgressIndicator()));
+        }
+        if (snapshot.hasError) return Text('Error: ${snapshot.error}');
+
+        final data = snapshot.data?.docs ?? [];
+        if (data.isEmpty) {
+          if (title != null) return const SizedBox.shrink(); // Hide section if empty in merged view
+          return const Center(child: Padding(padding: EdgeInsets.all(20), child: Text('Belum ada data kategori')));
+        }
+
+        Widget listContent = ListView.builder(
+          shrinkWrap: !isScrollable,
+          physics: isScrollable ? const AlwaysScrollableScrollPhysics() : const NeverScrollableScrollPhysics(),
+          itemCount: data.length,
+          itemBuilder: (context, index) {
+            final doc = data[index];
+            final kategori = doc.data() as Map<String, dynamic>;
+            return Card(
+              margin: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
+              elevation: 2,
+              child: ListTile(
+                leading: const Icon(Icons.category, color: Colors.orange),
+                title: Text(kategori['namaKategori'] ?? 'Unknown', style: const TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: Text('ID: ${kategori['idKategori'] ?? 'N/A'}'),
+                trailing: IconButton(
+                  icon: const Icon(Icons.delete, color: Colors.red),
+                  onPressed: () => _deleteKategori(doc.reference),
+                ),
+              ),
+            );
+          },
+        );
+
+        if (title != null) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                child: Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.grey)),
+              ),
+              listContent,
+            ],
+          );
+        }
+        return listContent;
+      },
+    );
+  }
+
+  void _deleteKategori(DocumentReference docRef) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -2245,11 +2218,7 @@ class _KategoriListScreenState extends State<KategoriListScreen> {
           ),
           TextButton(
             onPressed: () {
-              if (_isProMember && _currentUserFamilyId != null) {
-                _firestore.collection('families').doc(_currentUserFamilyId!).collection('kategori').doc(docId).delete();
-              } else {
-                _firestore.collection('users').doc(user?.uid).collection('kategori').doc(docId).delete();
-              }
+              docRef.delete();
               Navigator.pop(context);
               showToast(
                 'Data kategori berhasil dihapus',
@@ -2474,149 +2443,122 @@ class _SubKategoriListScreenState extends State<SubKategoriListScreen> {
 
   @override
   Widget build(BuildContext context) {
-    Query collectionRef;
+    // Logic view: Jika Pro, tampilkan gabungan. Jika tidak, hanya user.
     if (_isProMember && _currentUserFamilyId != null) {
-      collectionRef = _firestore.collection('families').doc(_currentUserFamilyId!).collection('subkategori');
+      final familyRef = _firestore.collection('families').doc(_currentUserFamilyId!).collection('subkategori');
+      final userRef = _firestore.collection('users').doc(user?.uid).collection('subkategori');
+
+      return Scaffold(
+        appBar: AppBar(title: const Text('Daftar Sub Kategori'), centerTitle: true),
+        body: SingleChildScrollView(
+          child: Column(
+            children: [
+              _buildSubKategoriList(familyRef, 'Sub Kategori Keluarga'),
+              _buildSubKategoriList(userRef, 'Sub Kategori Pribadi'),
+              _buildAddButton(),
+            ],
+          ),
+        ),
+      );
     } else {
-      collectionRef = _firestore.collection('users').doc(user?.uid).collection('subkategori');
+      final userRef = _firestore.collection('users').doc(user?.uid).collection('subkategori');
+      return Scaffold(
+        appBar: AppBar(title: const Text('Daftar Sub Kategori'), centerTitle: true),
+        body: Column(
+          children: [
+            Expanded(child: _buildSubKategoriList(userRef, null, isScrollable: true)),
+            _buildAddButton(),
+          ],
+        ),
+      );
     }
+  }
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Daftar Sub Kategori'),
-        centerTitle: true,
-      ),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: collectionRef.snapshots(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
-          if (snapshot.hasError) {
-            if (snapshot.error.toString().contains('permission-denied')) {
-              return const Center(child: Padding(
-                padding: EdgeInsets.all(16.0),
-                child: Text('Akses Ditolak: Mohon update Firestore Security Rules untuk fitur Keluarga.', textAlign: TextAlign.center, style: TextStyle(color: Colors.red)),
-              ));
-            }
-            return Center(child: Text('Error: ${snapshot.error}'));
-          }
-
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.label,
-                    size: 80,
-                    color: Colors.grey.withOpacity(0.3),
-                  ),
-                  const SizedBox(height: 20),
-                  const Text(
-                    'Belum ada data sub kategori',
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: Colors.grey,
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  ElevatedButton.icon(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const AddSubKategoriScreen(),
-                        ),
-                      );
-                    },
-                    icon: const Icon(Icons.add),
-                    label: const Text('Tambah Sub Kategori'),
-                  ),
-                ],
-              ),
+  Widget _buildAddButton() {
+    return Padding(
+      padding: const EdgeInsets.all(15),
+      child: SizedBox(
+        width: double.infinity,
+        child: ElevatedButton.icon(
+          onPressed: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const AddSubKategoriScreen()),
             );
-          }
-
-          final subKategoriList = snapshot.data!.docs;
-
-          return SafeArea(
-            child: Column(
-              children: [
-                Expanded(
-                  child: ListView.builder(
-                    itemCount: subKategoriList.length,
-                    itemBuilder: (context, index) {
-                      final subKategori =
-                          subKategoriList[index].data() as Map<String, dynamic>;
-                      return Card(
-                        margin: const EdgeInsets.symmetric(
-                          horizontal: 15,
-                          vertical: 8,
-                        ),
-                        elevation: 2,
-                        child: ListTile(
-                          leading: const Icon(
-                            Icons.label,
-                            color: Colors.purple,
-                          ),
-                          title: Text(
-                            subKategori['namaSubKategori'] ?? 'Unknown',
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          subtitle: Text(
-                              'ID: ${subKategori['idSubKategori'] ?? 'N/A'}'),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(
-                                icon: const Icon(Icons.edit, color: Colors.blue),
-                                onPressed: () => _editSubKategori(subKategoriList[index].id, subKategori['namaSubKategori'] ?? ''),
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.delete, color: Colors.red),
-                                onPressed: () {
-                                  _deleteSubKategori(subKategoriList[index].id);
-                                },
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(15),
-                  child: SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => const AddSubKategoriScreen(),
-                          ),
-                        );
-                      },
-                      icon: const Icon(Icons.add),
-                      label: const Text('Tambah Sub Kategori'),
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
+          },
+          icon: const Icon(Icons.add),
+          label: const Text('Tambah Sub Kategori'),
+          style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12)),
+        ),
       ),
     );
   }
 
-  void _editSubKategori(String docId, String currentName) {
+  Widget _buildSubKategoriList(Query collectionRef, String? title, {bool isScrollable = false}) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: collectionRef.snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Padding(padding: EdgeInsets.all(20), child: Center(child: CircularProgressIndicator()));
+        }
+        if (snapshot.hasError) return Text('Error: ${snapshot.error}');
+
+        final data = snapshot.data?.docs ?? [];
+        if (data.isEmpty) {
+          if (title != null) return const SizedBox.shrink();
+          return const Center(child: Padding(padding: EdgeInsets.all(20), child: Text('Belum ada data sub kategori')));
+        }
+
+        Widget listContent = ListView.builder(
+          shrinkWrap: !isScrollable,
+          physics: isScrollable ? const AlwaysScrollableScrollPhysics() : const NeverScrollableScrollPhysics(),
+          itemCount: data.length,
+          itemBuilder: (context, index) {
+            final doc = data[index];
+            final subKategori = doc.data() as Map<String, dynamic>;
+            return Card(
+              margin: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
+              elevation: 2,
+              child: ListTile(
+                leading: const Icon(Icons.label, color: Colors.purple),
+                title: Text(subKategori['namaSubKategori'] ?? 'Unknown', style: const TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: Text('ID: ${subKategori['idSubKategori'] ?? 'N/A'}'),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.edit, color: Colors.blue),
+                      onPressed: () => _editSubKategori(doc.reference, subKategori['namaSubKategori'] ?? ''),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete, color: Colors.red),
+                      onPressed: () => _deleteSubKategori(doc.reference),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+
+        if (title != null) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                child: Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.grey)),
+              ),
+              listContent,
+            ],
+          );
+        }
+        return listContent;
+      },
+    );
+  }
+
+  void _editSubKategori(DocumentReference docRef, String currentName) {
     final controller = TextEditingController(text: currentName);
     showDialog(
       context: context,
@@ -2636,17 +2578,10 @@ class _SubKategoriListScreenState extends State<SubKategoriListScreen> {
               if (controller.text.trim().isEmpty) return;
               Navigator.pop(context);
               try {
-                if (_isProMember && _currentUserFamilyId != null) {
-                  await _firestore.collection('families').doc(_currentUserFamilyId!).collection('subkategori').doc(docId).update({
-                    'namaSubKategori': controller.text.trim(),
-                    'updatedAt': FieldValue.serverTimestamp(),
-                  });
-                } else {
-                  await _firestore.collection('users').doc(user?.uid).collection('subkategori').doc(docId).update({
-                    'namaSubKategori': controller.text.trim(),
-                    'updatedAt': FieldValue.serverTimestamp(),
-                  });
-                }
+                await docRef.update({
+                  'namaSubKategori': controller.text.trim(),
+                  'updatedAt': FieldValue.serverTimestamp(),
+                });
                 if (mounted) showToast('Nama sub kategori berhasil diubah', context: context);
               } catch (e) {
                 if (mounted) showToast('Error: $e', context: context);
@@ -2659,7 +2594,7 @@ class _SubKategoriListScreenState extends State<SubKategoriListScreen> {
     );
   }
 
-  void _deleteSubKategori(String docId) {
+  void _deleteSubKategori(DocumentReference docRef) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -2673,11 +2608,7 @@ class _SubKategoriListScreenState extends State<SubKategoriListScreen> {
           ),
           TextButton(
             onPressed: () {
-              if (_isProMember && _currentUserFamilyId != null) {
-                _firestore.collection('families').doc(_currentUserFamilyId!).collection('subkategori').doc(docId).delete();
-              } else {
-                _firestore.collection('users').doc(user?.uid).collection('subkategori').doc(docId).delete();
-              }
+              docRef.delete();
               Navigator.pop(context);
               showToast(
                 'Data sub kategori berhasil dihapus',
@@ -2918,147 +2849,122 @@ class _BankListScreenState extends State<BankListScreen> {
 
   @override
   Widget build(BuildContext context) {
-    Query collectionRef;
+    // Logic view: Jika Pro, tampilkan gabungan. Jika tidak, hanya user.
     if (_isProMember && _currentUserFamilyId != null) {
-      collectionRef = _firestore.collection('families').doc(_currentUserFamilyId!).collection('banks');
+      final familyRef = _firestore.collection('families').doc(_currentUserFamilyId!).collection('banks');
+      final userRef = _firestore.collection('users').doc(user?.uid).collection('banks');
+
+      return Scaffold(
+        appBar: AppBar(title: const Text('Daftar Bank'), centerTitle: true),
+        body: SingleChildScrollView(
+          child: Column(
+            children: [
+              _buildBankList(familyRef, 'Bank Keluarga'),
+              _buildBankList(userRef, 'Bank Pribadi'),
+              _buildAddButton(),
+            ],
+          ),
+        ),
+      );
     } else {
-      collectionRef = _firestore.collection('users').doc(user?.uid).collection('banks');
+      final userRef = _firestore.collection('users').doc(user?.uid).collection('banks');
+      return Scaffold(
+        appBar: AppBar(title: const Text('Daftar Bank'), centerTitle: true),
+        body: Column(
+          children: [
+            Expanded(child: _buildBankList(userRef, null, isScrollable: true)),
+            _buildAddButton(),
+          ],
+        ),
+      );
     }
+  }
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Daftar Bank'),
-        centerTitle: true,
-      ),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: collectionRef.snapshots(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
-          if (snapshot.hasError) {
-            if (snapshot.error.toString().contains('permission-denied')) {
-              return const Center(child: Padding(
-                padding: EdgeInsets.all(16.0),
-                child: Text('Akses Ditolak: Mohon update Firestore Security Rules untuk fitur Keluarga.', textAlign: TextAlign.center, style: TextStyle(color: Colors.red)),
-              ));
-            }
-            return Center(child: Text('Error: ${snapshot.error}'));
-          }
-
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.account_balance,
-                    size: 80,
-                    color: Colors.grey.withOpacity(0.3),
-                  ),
-                  const SizedBox(height: 20),
-                  const Text(
-                    'Belum ada data bank',
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: Colors.grey,
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  ElevatedButton.icon(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const AddBankScreen(),
-                        ),
-                      );
-                    },
-                    icon: const Icon(Icons.add),
-                    label: const Text('Tambah Bank'),
-                  ),
-                ],
-              ),
+  Widget _buildAddButton() {
+    return Padding(
+      padding: const EdgeInsets.all(15),
+      child: SizedBox(
+        width: double.infinity,
+        child: ElevatedButton.icon(
+          onPressed: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const AddBankScreen()),
             );
-          }
-
-          final banks = snapshot.data!.docs;
-
-          return SafeArea(
-            child: Column(
-              children: [
-                Expanded(
-                  child: ListView.builder(
-                    itemCount: banks.length,
-                    itemBuilder: (context, index) {
-                      final bank = banks[index].data() as Map<String, dynamic>;
-                      return Card(
-                        margin: const EdgeInsets.symmetric(
-                          horizontal: 15,
-                          vertical: 8,
-                        ),
-                        elevation: 2,
-                        child: ListTile(
-                          leading: const Icon(
-                            Icons.account_balance,
-                            color: Colors.green,
-                          ),
-                          title: Text(
-                            bank['namaBanks'] ?? 'Unknown',
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          subtitle: Text('ID: ${bank['idBank'] ?? 'N/A'}'),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(
-                                icon: const Icon(Icons.edit, color: Colors.blue),
-                                onPressed: () => _editBank(banks[index].id, bank['namaBanks'] ?? ''),
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.delete, color: Colors.red),
-                                onPressed: () {
-                                  _deleteBank(banks[index].id);
-                                },
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(15),
-                  child: SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => const AddBankScreen(),
-                          ),
-                        );
-                      },
-                      icon: const Icon(Icons.add),
-                      label: const Text('Tambah Bank'),
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
+          },
+          icon: const Icon(Icons.add),
+          label: const Text('Tambah Bank'),
+          style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12)),
+        ),
       ),
     );
   }
 
-  void _editBank(String docId, String currentName) {
+  Widget _buildBankList(Query collectionRef, String? title, {bool isScrollable = false}) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: collectionRef.snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Padding(padding: EdgeInsets.all(20), child: Center(child: CircularProgressIndicator()));
+        }
+        if (snapshot.hasError) return Text('Error: ${snapshot.error}');
+
+        final data = snapshot.data?.docs ?? [];
+        if (data.isEmpty) {
+          if (title != null) return const SizedBox.shrink();
+          return const Center(child: Padding(padding: EdgeInsets.all(20), child: Text('Belum ada data bank')));
+        }
+
+        Widget listContent = ListView.builder(
+          shrinkWrap: !isScrollable,
+          physics: isScrollable ? const AlwaysScrollableScrollPhysics() : const NeverScrollableScrollPhysics(),
+          itemCount: data.length,
+          itemBuilder: (context, index) {
+            final doc = data[index];
+            final bank = doc.data() as Map<String, dynamic>;
+            return Card(
+              margin: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
+              elevation: 2,
+              child: ListTile(
+                leading: const Icon(Icons.account_balance, color: Colors.green),
+                title: Text(bank['namaBanks'] ?? 'Unknown', style: const TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: Text('ID: ${bank['idBank'] ?? 'N/A'}'),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.edit, color: Colors.blue),
+                      onPressed: () => _editBank(doc.reference, bank['namaBanks'] ?? ''),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete, color: Colors.red),
+                      onPressed: () => _deleteBank(doc.reference),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+
+        if (title != null) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                child: Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.grey)),
+              ),
+              listContent,
+            ],
+          );
+        }
+        return listContent;
+      },
+    );
+  }
+
+  void _editBank(DocumentReference docRef, String currentName) {
     final controller = TextEditingController(text: currentName);
     showDialog(
       context: context,
@@ -3078,17 +2984,10 @@ class _BankListScreenState extends State<BankListScreen> {
               if (controller.text.trim().isEmpty) return;
               Navigator.pop(context);
               try {
-                if (_isProMember && _currentUserFamilyId != null) {
-                  await _firestore.collection('families').doc(_currentUserFamilyId!).collection('banks').doc(docId).update({
-                    'namaBanks': controller.text.trim(),
-                    'updatedAt': FieldValue.serverTimestamp(),
-                  });
-                } else {
-                  await _firestore.collection('users').doc(user?.uid).collection('banks').doc(docId).update({
-                    'namaBanks': controller.text.trim(),
-                    'updatedAt': FieldValue.serverTimestamp(),
-                  });
-                }
+                await docRef.update({
+                  'namaBanks': controller.text.trim(),
+                  'updatedAt': FieldValue.serverTimestamp(),
+                });
                 if (mounted) showToast('Nama bank berhasil diubah', context: context);
               } catch (e) {
                 if (mounted) showToast('Error: $e', context: context);
@@ -3101,7 +3000,7 @@ class _BankListScreenState extends State<BankListScreen> {
     );
   }
 
-  void _deleteBank(String docId) {
+  void _deleteBank(DocumentReference docRef) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -3114,11 +3013,7 @@ class _BankListScreenState extends State<BankListScreen> {
           ),
           TextButton(
             onPressed: () {
-              if (_isProMember && _currentUserFamilyId != null) {
-                _firestore.collection('families').doc(_currentUserFamilyId!).collection('banks').doc(docId).delete();
-              } else {
-                _firestore.collection('users').doc(user?.uid).collection('banks').doc(docId).delete();
-              }
+              docRef.delete();
               Navigator.pop(context);
               showToast(
                 'Data bank berhasil dihapus',

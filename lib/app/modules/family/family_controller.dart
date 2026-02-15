@@ -46,6 +46,8 @@ class FamilyController extends GetxController {
         .snapshots()
         .listen((snapshot) {
       sentInvitations.value = snapshot.docs;
+    }, onError: (e) {
+      print("Error listening to sent invitations: $e");
     });
   }
 
@@ -60,7 +62,11 @@ class FamilyController extends GetxController {
         if (familyDoc.exists) {
           final familyData = familyDoc.data()!;
           currentFamily.value = FamilyModel.fromMap(familyDoc.id, familyData);
-          _listenToSentInvitations(familyDoc.id); // Listen to outgoing invites
+          
+          // Hanya owner yang bisa melihat undangan keluar (menghindari Permission Denied untuk member biasa)
+          if (currentFamily.value?.ownerUid == user?.uid) {
+            _listenToSentInvitations(familyDoc.id);
+          }
           // familyMembers.value = await UserUtils.getFamilyMembers(familyId); // Diganti dengan implementasi manual
 
           // Ambil nama anggota keluarga secara manual untuk memastikan data nama benar
@@ -73,6 +79,14 @@ class FamilyController extends GetxController {
             }
           }
           familyMembers.value = members;
+        } else {
+          // Self-healing: Jika familyId ada di user tapi dokumen family tidak ditemukan (sudah dihapus)
+          print("Family doc not found. Cleaning up user profile.");
+          await _firestore.collection('users').doc(user!.uid).update({
+            'familyId': FieldValue.delete(),
+            'isProMember': false,
+          });
+          currentFamily.value = null;
         }
       }
     } catch (e) {
@@ -207,12 +221,31 @@ class FamilyController extends GetxController {
         'isProMember': true,
       });
 
-      // 3. Siapkan update untuk dokumen undangan (mengubah status)
-      final invitationRef = _firestore.collection('invitations').doc(invitationId);
-      batch.update(invitationRef, {
-        'status': 'accepted',
-        'updatedAt': FieldValue.serverTimestamp(), // Tambahkan jejak waktu
-      });
+      // 3. Update status undangan
+      // Cari SEMUA undangan pending untuk user ini di keluarga ini dan update statusnya
+      // Ini menangani kasus jika ada duplikat undangan atau ID yang tidak sinkron
+      final pendingInvites = await _firestore
+          .collection('invitations')
+          .where('familyId', isEqualTo: familyId)
+          .where('inviteeUid', isEqualTo: user!.uid)
+          .where('status', isEqualTo: 'pending')
+          .get();
+
+      if (pendingInvites.docs.isNotEmpty) {
+        for (var doc in pendingInvites.docs) {
+          batch.update(doc.reference, {
+            'status': 'accepted',
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+        }
+      } else {
+        // Fallback jika query tidak menemukan hasil, gunakan ID spesifik
+        final invitationRef = _firestore.collection('invitations').doc(invitationId);
+        batch.update(invitationRef, {
+          'status': 'accepted',
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      }
 
       // Jalankan semua operasi tulis sekaligus
       await batch.commit();
@@ -368,5 +401,50 @@ class FamilyController extends GetxController {
         }
       },
     );
+  }
+
+  Future<void> deleteFamily() async {
+    if (user == null || currentFamily.value == null) {
+      Get.snackbar("Error", "Data keluarga tidak ditemukan.");
+      return;
+    }
+
+    // Security check: Only owner can delete the family
+    if (user!.uid != currentFamily.value!.ownerUid) {
+      Get.snackbar("Akses Ditolak", "Hanya admin yang bisa menghapus keluarga.");
+      return;
+    }
+
+    isLoading.value = true;
+    
+    try {
+      // Hapus dokumen keluarga secara langsung (Client Side)
+      // Pastikan Security Rules di Firestore sudah mengizinkan delete untuk owner!
+      await _firestore.collection('families').doc(currentFamily.value!.id).delete();
+
+      // Update data user saat ini (Owner)
+      await _firestore.collection('users').doc(user!.uid).update({
+        'familyId': FieldValue.delete(),
+        'isProMember': false, // Kembalikan ke status free
+      });
+
+      Get.snackbar("Sukses", "Keluarga berhasil dihapus.");
+      
+      // Clear local state
+      currentFamily.value = null;
+      familyMembers.clear();
+      sentInvitations.clear();
+      
+    } catch (e) {
+        Get.snackbar(
+          "Error", 
+          "Gagal menghapus keluarga: $e",
+          snackPosition: SnackPosition.BOTTOM,
+          duration: const Duration(seconds: 8)
+        );
+        print("Error deleting family: $e");
+    } finally {
+        isLoading.value = false;
+    }
   }
 }
