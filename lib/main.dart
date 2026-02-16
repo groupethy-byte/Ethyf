@@ -36,14 +36,17 @@ void main() async {
   await LocalDatabaseService.initHive();
   
   try {
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
+    // Cek apakah instance Firebase sudah ada untuk menghindari error saat Hot Restart
+    if (Firebase.apps.isEmpty) {
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+    }
     
-    // Sync data setelah Firebase initialized
+    // Sync data setelah Firebase initialized (atau jika sudah ada)
     await SyncService.syncAllData();
   } catch (e) {
-    print('Firebase initialization error: $e');
+    print('Firebase initialization/sync error: $e');
   }
   
   runApp(const MyApp());
