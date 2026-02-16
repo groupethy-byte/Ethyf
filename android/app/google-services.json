@@ -23,6 +23,14 @@
           }
         },
         {
+          "client_id": "735490202400-m2pf692o6dqf5q79snqahkioae4a0pis.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.ethyf.finance",
+            "certificate_hash": "eaad8bea6532ae1fc03b1753120d00c757eea46e"
+          }
+        },
+        {
           "client_id": "735490202400-h76arro36fppbivs7nlc1qlt1tf994b0.apps.googleusercontent.com",
           "client_type": 3
         }
